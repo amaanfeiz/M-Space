@@ -1,0 +1,32 @@
+# Next.js
+.next/
+out/
+build/
+
+# Dependencies
+node_modules/
+
+# Environment variables — never commit these
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Vercel
+.vercel
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# pnpm
+.pnpm-store/
+
+# Reference data — CSV exports stay local, not in git
+reference/*.csv
+reference/*.xlsx
+
+# OS
+.DS_Store
+Thumbs.db
