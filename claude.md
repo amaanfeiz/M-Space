@@ -2,6 +2,10 @@
 
 > This file is read by Claude Code at the start of every session. Keep it accurate, keep it terse. If it grows past ~250 lines, split it.
 
+## Working vault (READ FIRST)
+
+Persistent notes vault: `C:\Users\Amaan\Obsidian\Meragi-Intel`. Always check `vault/sessions/` for the most recent session note before assuming project state. Pre-written task specs live in `vault/tasks/`; visual feedback in `vault/feedback/`; locked decisions in `vault/decisions/`. Read on demand — do not load the whole vault.
+
 ## Who and what
 
 **Builder:** Amaan Abdul Kader. Team Lead at Meragi Celebrations (Indian destination weddings). Manages 4 sub-teams across the destination department. Self-described beginner at coding — comfortable in Sheets and Claude chat, struggled with the demo's GitHub/Vercel setup. Treat him as a smart, busy non-engineer who needs commands explained the first time and doesn't need them re-explained the second time.
