@@ -1,6 +1,7 @@
 import { ChevronRight } from 'lucide-react'
 import type { Project } from '@/lib/types/project'
 import { formatCouple, riskDotClass } from '@/lib/types/project'
+import { PIDLink } from '@/components/panel/PIDLink'
 
 type TodaysPrioritiesProps = {
   projects: Project[]
@@ -23,7 +24,7 @@ export function TodaysPriorities({ projects }: TodaysPrioritiesProps) {
         <div className="count-pill">{projects.length} items</div>
       </div>
       {projects.map((p) => (
-        <div key={p.pid} className="priority-row">
+        <PIDLink key={p.pid} pid={p.pid} className="priority-row">
           <div className="priority-left">
             <span className={`status-dot ${riskDotClass(p.overall_pid_risk)}`} />
             <span className="pid-text">{p.pid}</span>
@@ -33,7 +34,7 @@ export function TodaysPriorities({ projects }: TodaysPrioritiesProps) {
             <span>{prioritySummary(p)}</span>
             <ChevronRight style={{ width: 13, height: 13 }} />
           </div>
-        </div>
+        </PIDLink>
       ))}
     </div>
   )

@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { Sidebar } from '@/components/shell/Sidebar'
 import { Topbar } from '@/components/shell/Topbar'
+import { DetailPanel } from '@/components/panel/DetailPanel'
 import { createClient } from '@/lib/supabase/server'
 
 function userDisplayFromEmail(email: string) {
@@ -33,15 +34,26 @@ export default async function AppLayout({
 
   const { name, initials } = userDisplayFromEmail(user.email)
 
+  // Read last sync time
+  const { data: syncLog } = await supabase
+    .from('sync_log')
+    .select('created_at')
+    .eq('status', 'success')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  const syncedAt = syncLog?.created_at ?? null
+
   return (
     <>
       <Sidebar userName={name} userInitials={initials} userRole="Team Lead" />
       <div id="main">
-        <Topbar />
+        <Topbar syncedAt={syncedAt} />
         <div id="content">
           <div className="view-container">{children}</div>
         </div>
       </div>
+      <DetailPanel />
     </>
   )
 }

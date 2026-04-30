@@ -4,6 +4,7 @@ import {
   formatCouple,
   sparklineColor,
 } from '@/lib/types/project'
+import { PIDLink } from '@/components/panel/PIDLink'
 
 type RiskMonitorProps = {
   projects: Project[]
@@ -38,7 +39,7 @@ export function RiskMonitor({ projects }: RiskMonitorProps) {
         const points = flatSparkline(p.cancellation_risk)
         const color = sparklineColor(p.overall_pid_risk)
         return (
-          <div key={p.pid} className="risk-row">
+          <PIDLink key={p.pid} pid={p.pid} className="risk-row">
             <span className="risk-pid">{p.pid}</span>
             <span className="risk-couple">{formatCouple(p.cx_name)}</span>
             <div className="sparkline-wrap">
@@ -59,7 +60,7 @@ export function RiskMonitor({ projects }: RiskMonitorProps) {
             >
               {riskLabel(p.cancellation_risk)}
             </span>
-          </div>
+          </PIDLink>
         )
       })}
     </div>

@@ -1,0 +1,407 @@
+'use client'
+
+import { X } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { createClient } from '@/lib/supabase/client'
+import { PID_DATA } from '@/lib/static/pid_data_static'
+import { formatInr } from '@/lib/types/project'
+import type { StaticPID } from '@/lib/static/pid_data_static'
+
+type DBProject = {
+  pid: number
+  cx_name: string | null
+  status: string | null
+  overall_pid_risk: string | null
+  cancellation_risk: number | null
+  current_summary: string | null
+  ai_notes_summary: string | null
+  bgmv: number | null
+  collection: number | null
+  collection_pct: number | null
+  package_price_eff: number | null
+  event_start_date: string | null
+  venue: string | null
+  state: string | null
+  planner: string | null
+  designer: string | null
+  project_manager: string | null
+  cancellation_risk_reason: string | null
+  collection_risk: string | null
+  communication_risk: string | null
+  sentiment_risk: string | null
+}
+
+function daysUntil(dateStr: string | null): number | null {
+  if (!dateStr) return null
+  const diff = new Date(dateStr).getTime() - Date.now()
+  return Math.ceil(diff / 86400000)
+}
+
+function levelColor(level: string | null) {
+  if (level === 'Critical' || level === 'critical') return 'var(--critical)'
+  if (level === 'Attention' || level === 'attention') return 'var(--attention)'
+  return 'var(--healthy)'
+}
+
+function collectClass(pct: number | null): string {
+  if (!pct) return 'money-collected-red'
+  if (pct > 40) return 'money-collected-green'
+  if (pct > 20) return 'money-collected-amber'
+  return 'money-collected-red'
+}
+
+function SectionTitle({ children, ai }: { children: React.ReactNode; ai?: boolean }) {
+  return (
+    <div className="panel-section-title">
+      {ai && <div className="panel-ai-dot" />}
+      {children}
+    </div>
+  )
+}
+
+function TeamSection({ s }: { s: StaticPID }) {
+  return (
+    <div>
+      <SectionTitle>Team Status</SectionTitle>
+      {s.team_status.map((m, i) => (
+        <div key={i} className="team-status-row" style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--border-subtle)' }}>
+          <div className="ts-avatar" style={{ background: m.bg, color: m.color }}>{m.initials}</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              <span className="ts-name">{m.name}</span>
+              <span className="ts-role">· {m.role}</span>
+              <span className={`engagement-chip ${m.engagement}`}>{m.engagement}</span>
+              {m.carrying_signal === 'Stretched' && (
+                <span className="carrying-pill Stretched">Stretched</span>
+              )}
+            </div>
+            <div className="ts-last-action">Last action: {m.last_action}</div>
+            <div className="ts-notes">{m.notes}</div>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function CommsSection({ s }: { s: StaticPID }) {
+  const [open, setOpen] = useState(false)
+  const barPct = s.comms.client_chattiness
+  const barColor = barPct > 70 ? 'var(--healthy)' : barPct > 40 ? 'var(--accent)' : 'var(--attention)'
+  return (
+    <div>
+      <SectionTitle>Communications</SectionTitle>
+      <div className="comms-chattiness-label">
+        {s.comms.client_chattiness_label}
+        {s.comms.off_channel_indicator && <span className="off-channel-pill" style={{ marginLeft: 8 }}>Off-channel</span>}
+      </div>
+      <div className="comms-bar-wrap">
+        <div style={{ fontSize: 11, color: 'var(--text-dim)', flexShrink: 0, minWidth: 20 }}>0</div>
+        <div className="comms-bar-track">
+          <div className="comms-bar-fill" style={{ width: `${barPct}%`, background: barColor }} />
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--text-dim)', flexShrink: 0, minWidth: 20 }}>100</div>
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+        Last client message: <strong style={{ color: 'var(--text-primary)' }}>{s.comms.last_client_message}</strong>
+      </div>
+      {s.comms.open_commitments > 0 && (
+        <>
+          <div
+            onClick={() => setOpen(!open)}
+            style={{ marginTop: 8, fontSize: 12, cursor: 'pointer', color: 'var(--accent)' }}
+          >
+            Open commitments: <strong>{s.comms.open_commitments}</strong> ▾
+          </div>
+          <div className={`commitments-list${open ? ' open' : ''}`}>
+            {s.comms.open_commitments_detail.map((c, i) => (
+              <div key={i} className="commitment-item">{c}</div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+function VendorSection({ s }: { s: StaticPID }) {
+  const icon: Record<string, string> = { confirmed: '✓', in_progress: '·', blocked: '✗', unassigned: '.' }
+  return (
+    <div>
+      <SectionTitle>Vendor Coverage</SectionTitle>
+      <div className="vendor-grid">
+        {s.vendor_coverage.map((v, i) => (
+          <div key={i} className={`vendor-pill ${v.status}`} title={v.note}>
+            <span>{icon[v.status] ?? '·'}</span>
+            <span>{v.vendor_type}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function DecisionSection({ s }: { s: StaticPID }) {
+  const velColor = s.decision_intel.velocity === 'fast' ? 'var(--healthy)'
+    : s.decision_intel.velocity === 'deliberate' ? 'var(--attention)' : 'var(--text-muted)'
+  return (
+    <div>
+      <SectionTitle>Decision Intel</SectionTitle>
+      <div className="decision-velocity" style={{ color: velColor }}>
+        {s.decision_intel.velocity.charAt(0).toUpperCase() + s.decision_intel.velocity.slice(1)}
+      </div>
+      <div className="decision-vel-note">{s.decision_intel.velocity_note}</div>
+      <div style={{ marginTop: 10 }}>
+        {s.decision_intel.decision_makers.map((dm, i) => (
+          <div key={i} className="decision-maker-row">
+            <div className="dm-name">{dm.name}</div>
+            <div className="dm-role">{dm.role}</div>
+            <div className="dm-authority">{dm.authority}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ActionsSection({ s }: { s: StaticPID }) {
+  return (
+    <div>
+      <SectionTitle>Action Items</SectionTitle>
+      {s.actions.map((a, i) => (
+        <div key={i} className="action-item">
+          <input type="checkbox" className="action-cb" readOnly />
+          <span className="action-text">{a.text}</span>
+          <span className={`pchip-${a.priority}`}>
+            {a.priority.charAt(0).toUpperCase() + a.priority.slice(1)}
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function MessagesSection({ s }: { s: StaticPID }) {
+  return (
+    <div>
+      <SectionTitle>Recent Messages</SectionTitle>
+      {s.messages.map((m, i) => (
+        <div key={i} className={`msg-card${m.negative ? ' negative' : ''}`}>
+          <div className="msg-header">
+            <div className="msg-avatar" style={{ background: m.bg, color: m.color }}>{m.initials}</div>
+            <span className="msg-sender">{m.sender}</span>
+            <span className="msg-role">· {m.role}</span>
+            <span className="msg-time">{m.time}</span>
+          </div>
+          <div className="msg-body">{m.body}</div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function TLDirectiveSection({ s }: { s: StaticPID }) {
+  return (
+    <div>
+      <SectionTitle>TL Directive</SectionTitle>
+      <div style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.65 }}>{s.tl_directive}</div>
+    </div>
+  )
+}
+
+function SuggestedReplySection({ s }: { s: StaticPID }) {
+  return (
+    <div>
+      <SectionTitle>Suggested Reply</SectionTitle>
+      <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 6 }}>
+        Drafted for <strong style={{ color: 'var(--text-muted)' }}>{s.suggested_client_reply.drafted_for}</strong>
+        {' → '}{s.suggested_client_reply.to}
+      </div>
+      <textarea className="panel-textarea" readOnly defaultValue={s.suggested_client_reply.body} />
+      <div className="panel-btn-row">
+        <button className="btn-secondary" type="button">Copy</button>
+      </div>
+    </div>
+  )
+}
+
+function MoneySection({ p }: { p: DBProject; s: StaticPID | null }) {
+  const collected = formatInr(p.collection)
+  const pending = p.package_price_eff && p.collection ? formatInr(p.package_price_eff - p.collection) : '—'
+  const pct = p.collection_pct ?? 0
+  return (
+    <div>
+      <SectionTitle>Money</SectionTitle>
+      <table className="money-table">
+        <tbody>
+          <tr><td>Package SP</td><td>{formatInr(p.package_price_eff)}</td></tr>
+          <tr>
+            <td>Collected</td>
+            <td>
+              <span className={collectClass(p.collection_pct)}>
+                {collected} <span style={{ fontSize: 11, fontWeight: 400 }}>({pct.toFixed(1)}%)</span>
+              </span>
+            </td>
+          </tr>
+          <tr><td>Pending</td><td>{pending}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+export function DetailPanel() {
+  const [openPid, setOpenPid] = useState<string | null>(null)
+  const [project, setProject] = useState<DBProject | null>(null)
+
+  useEffect(() => {
+    function onHashChange() {
+      const match = window.location.hash.match(/^#pid=(\d+)$/)
+      setOpenPid(match ? match[1] : null)
+    }
+    onHashChange()
+    window.addEventListener('hashchange', onHashChange)
+    return () => window.removeEventListener('hashchange', onHashChange)
+  }, [])
+
+  useEffect(() => {
+    if (!openPid) { return }
+    const supabase = createClient()
+    supabase
+      .from('projects')
+      .select('pid, cx_name, status, overall_pid_risk, cancellation_risk, current_summary, ai_notes_summary, bgmv, collection, collection_pct, package_price_eff, event_start_date, venue, state, planner, designer, project_manager, cancellation_risk_reason, collection_risk, communication_risk, sentiment_risk')
+      .eq('pid', parseInt(openPid))
+      .single()
+      .then(({ data }) => {
+        setProject(data as DBProject | null)
+      })
+  }, [openPid])
+
+  useEffect(() => {
+    const isOpen = !!openPid
+    document.getElementById('panel-overlay')?.classList.toggle('open', isOpen)
+    document.getElementById('detail-panel')?.classList.toggle('open', isOpen)
+    document.body.style.overflow = isOpen ? 'hidden' : ''
+  }, [openPid])
+
+  function close() {
+    history.pushState('', document.title, window.location.pathname + window.location.search)
+    setOpenPid(null)
+  }
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape' && openPid) close()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [openPid])
+
+  const staticData = openPid ? (PID_DATA[openPid] ?? null) : null
+  const isLoading = openPid !== null && (project === null || String(project.pid) !== openPid)
+  const riskLevel = project?.overall_pid_risk ?? staticData?.statusLevel ?? null
+  const days = daysUntil(project?.event_start_date ?? null)
+
+  return (
+    <>
+      <div id="panel-overlay" onClick={close} />
+      <div id="detail-panel">
+        {openPid && (
+          <>
+            <div className="panel-header">
+              <div>
+                <div className="panel-pid">PID {openPid}</div>
+                <div className="panel-couple">
+                  {project?.cx_name?.replace(' & ', ' · ') ?? staticData?.couple ?? '—'}
+                </div>
+              </div>
+              <button className="panel-close" onClick={close} type="button">
+                <X style={{ width: 13, height: 13 }} />
+              </button>
+            </div>
+            <div className="panel-body">
+              {isLoading && (
+                <div style={{ color: 'var(--text-dim)', fontSize: 13 }}>Loading…</div>
+              )}
+              {!isLoading && project && (
+                <>
+                  {/* Status strip */}
+                  <div className="panel-strip-row">
+                    {days !== null && (
+                      <div>
+                        <div className="panel-days-countdown" style={{ color: levelColor(riskLevel) }}>
+                          {days}
+                        </div>
+                        <div className="panel-days-label">Days to event</div>
+                      </div>
+                    )}
+                    <div className="panel-health-badge">
+                      <div style={{ width: 10, height: 10, borderRadius: '50%', background: levelColor(riskLevel), boxShadow: `0 0 8px ${levelColor(riskLevel)}40` }} />
+                      <div style={{ fontSize: 9, color: 'var(--text-dim)', marginTop: 3, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                        {riskLevel ?? 'unknown'}
+                      </div>
+                    </div>
+                    {staticData && (
+                      <div className="risk-pills">
+                        {staticData.risk_vectors.map((r, i) => (
+                          <span key={i} className={`risk-pill ${r.severity}`}>{r.label}</span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* AI Analysis */}
+                  {staticData?.analysis && staticData.analysis.length > 0 && (
+                    <div>
+                      <SectionTitle ai>AI Analysis</SectionTitle>
+                      <div className="panel-analysis">
+                        {staticData.analysis.map((para, i) => (
+                          <p key={i} dangerouslySetInnerHTML={{ __html: para }} />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {!staticData && (project.current_summary || project.ai_notes_summary) && (
+                    <div>
+                      <SectionTitle ai>AI Analysis</SectionTitle>
+                      <div className="panel-analysis">
+                        {project.current_summary && <p>{project.current_summary}</p>}
+                        {project.ai_notes_summary && <p>{project.ai_notes_summary}</p>}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="panel-2col">
+                    <div className="panel-col">
+                      {/* Team status — static only */}
+                      {staticData && <TeamSection s={staticData} />}
+                      {/* Comms — static only */}
+                      {staticData && <CommsSection s={staticData} />}
+                      {/* Money — DB */}
+                      <MoneySection p={project} s={staticData} />
+                    </div>
+                    <div className="panel-col">
+                      {/* Vendor — static only */}
+                      {staticData && <VendorSection s={staticData} />}
+                      {/* Decision intel — static only */}
+                      {staticData && <DecisionSection s={staticData} />}
+                      {/* Actions — static only */}
+                      {staticData && <ActionsSection s={staticData} />}
+                    </div>
+                  </div>
+
+                  {/* Messages — static only */}
+                  {staticData && <MessagesSection s={staticData} />}
+                  {/* TL Directive — static only */}
+                  {staticData && <TLDirectiveSection s={staticData} />}
+                  {/* Suggested Reply — static only */}
+                  {staticData && <SuggestedReplySection s={staticData} />}
+                </>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </>
+  )
+}

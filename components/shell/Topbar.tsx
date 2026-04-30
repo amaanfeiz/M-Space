@@ -14,9 +14,26 @@ const TITLES: Record<string, string> = {
   '/settings': 'Settings',
 }
 
-export function Topbar() {
+function syncPillColor(syncedAt: string | null): string {
+  if (!syncedAt) return 'var(--text-dim)'
+  const mins = (Date.now() - new Date(syncedAt).getTime()) / 60000
+  if (mins < 30) return 'var(--healthy)'
+  if (mins < 60) return 'var(--attention)'
+  return 'var(--critical)'
+}
+
+function syncLabel(syncedAt: string | null): string {
+  if (!syncedAt) return 'Sync unknown'
+  const mins = Math.floor((Date.now() - new Date(syncedAt).getTime()) / 60000)
+  if (mins < 2) return 'Last sync: just now'
+  if (mins < 60) return `Last sync: ${mins}m ago`
+  return `Last sync: ${Math.floor(mins / 60)}h ago`
+}
+
+export function Topbar({ syncedAt }: { syncedAt?: string | null }) {
   const pathname = usePathname()
   const title = TITLES[pathname] ?? 'Meragi Intel'
+  const dotColor = syncPillColor(syncedAt ?? null)
 
   return (
     <header id="topbar">
@@ -34,16 +51,10 @@ export function Topbar() {
         <span className="search-kbd">⌘K</span>
       </div>
       <div className="topbar-right">
-        <button className="filter-pill" type="button">
-          All Teams
-        </button>
-        <button className="filter-pill" type="button">
-          All Months
-        </button>
         <div className="topbar-divider" />
         <div className="sync-pill">
-          <div className="pulse-dot" />
-          <span>Last sync: just now</span>
+          <div className="pulse-dot" style={{ background: dotColor }} />
+          <span>{syncLabel(syncedAt ?? null)}</span>
         </div>
         <ThemeToggle />
       </div>
