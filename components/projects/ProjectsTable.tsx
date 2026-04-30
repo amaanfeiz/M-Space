@@ -17,6 +17,8 @@ type Row = {
   city: string | null
 }
 
+const TBA = (v: string | null | undefined) => (v && v.trim() ? v : 'TBA')
+
 export function ProjectsTable({ projects }: { projects: Row[] }) {
   return (
     <div style={{ overflowX: 'auto' }}>
@@ -38,25 +40,45 @@ export function ProjectsTable({ projects }: { projects: Row[] }) {
           {projects.map((p) => (
             <tr
               key={p.pid}
-              onClick={() => { window.location.hash = `#pid=${p.pid}` }}
+              onClick={() => {
+                window.location.hash = `#pid=${p.pid}`
+              }}
               style={{ cursor: 'pointer' }}
             >
-              <td style={{ color: 'var(--text-primary)', fontFamily: "'Courier New', monospace" }}>{p.pid}</td>
-              <td style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{formatCouple(p.cx_name)}</td>
-              <td>{p.state ?? p.city ?? '—'}</td>
-              <td>{p.planner ?? '—'}</td>
-              <td>{p.designer ?? '—'}</td>
-              <td>{p.project_manager ?? '—'}</td>
-              <td>
+              <td
+                style={{
+                  color: 'var(--text-primary)',
+                  fontFamily: "'Courier New', monospace",
+                }}
+              >
+                {p.pid}
+              </td>
+              <td style={{ color: 'var(--text-primary)', fontWeight: 500 }}>
+                {formatCouple(p.cx_name)}
+              </td>
+              <td>{TBA(p.state ?? p.city)}</td>
+              <td>{TBA(p.planner)}</td>
+              <td>{TBA(p.designer)}</td>
+              <td>{TBA(p.project_manager)}</td>
+              <td style={{ fontVariantNumeric: 'tabular-nums' }}>
                 {p.event_start_date
-                  ? new Date(p.event_start_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' })
-                  : '—'}
+                  ? new Date(p.event_start_date).toLocaleDateString('en-IN', {
+                      day: 'numeric',
+                      month: 'short',
+                      year: '2-digit',
+                    })
+                  : 'TBA'}
               </td>
               <td>
-                <span className={`status-dot ${riskDotClass(p.overall_pid_risk)}`} style={{ marginRight: 6 }} />
-                {p.overall_pid_risk ?? '—'}
+                <span
+                  className={`status-dot ${riskDotClass(p.overall_pid_risk)}`}
+                  style={{ marginRight: 6 }}
+                />
+                {p.overall_pid_risk ?? 'TBA'}
               </td>
-              <td style={{ fontVariantNumeric: 'tabular-nums' }}>{formatInr(p.bgmv)}</td>
+              <td style={{ fontVariantNumeric: 'tabular-nums' }}>
+                {formatInr(p.bgmv)}
+              </td>
             </tr>
           ))}
         </tbody>

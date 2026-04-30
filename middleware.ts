@@ -23,14 +23,18 @@ export async function middleware(request: NextRequest) {
     }
   )
 
-  const { data: { user } } = await supabase.auth.getUser()
   const { pathname } = request.nextUrl
 
   if (pathname.startsWith('/login') || pathname.startsWith('/auth')) {
     return supabaseResponse
   }
 
-  if (!user) {
+  // Fast cookie-based session check (no network roundtrip).
+  // getUser() is reserved for the auth callback where we actually
+  // need to validate the token against the auth server.
+  const { data: { session } } = await supabase.auth.getSession()
+
+  if (!session) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     return NextResponse.redirect(url)
