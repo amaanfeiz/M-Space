@@ -1,6 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { formatCouple, formatInr, riskDotClass } from '@/lib/types/project'
-import { PIDLink } from '@/components/panel/PIDLink'
+import { ProjectsTable } from '@/components/projects/ProjectsTable'
 
 export default async function ProjectsPage() {
   const supabase = await createClient()
@@ -30,47 +29,7 @@ export default async function ProjectsPage() {
             </div>
           </div>
         </div>
-        <div style={{ overflowX: 'auto' }}>
-          <table className="projects-table">
-            <thead>
-              <tr>
-                <th>PID</th>
-                <th>Couple</th>
-                <th>Region</th>
-                <th>Planner</th>
-                <th>Designer</th>
-                <th>PM</th>
-                <th>Event</th>
-                <th>Health</th>
-                <th>BGMV</th>
-              </tr>
-            </thead>
-            <tbody>
-              {projects.map((p) => (
-                <PIDLink key={p.pid} pid={p.pid} style={{ display: 'contents' }}>
-                  <tr onClick={() => { window.location.hash = `#pid=${p.pid}` }} style={{ cursor: 'pointer' }}>
-                    <td style={{ color: 'var(--text-primary)', fontFamily: "'Courier New', monospace" }}>{p.pid}</td>
-                    <td style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{formatCouple(p.cx_name)}</td>
-                    <td>{p.state ?? p.city ?? '—'}</td>
-                    <td>{p.planner ?? '—'}</td>
-                    <td>{p.designer ?? '—'}</td>
-                    <td>{p.project_manager ?? '—'}</td>
-                    <td>
-                      {p.event_start_date
-                        ? new Date(p.event_start_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' })
-                        : '—'}
-                    </td>
-                    <td>
-                      <span className={`status-dot ${riskDotClass(p.overall_pid_risk)}`} style={{ marginRight: 6 }} />
-                      {p.overall_pid_risk ?? '—'}
-                    </td>
-                    <td style={{ fontVariantNumeric: 'tabular-nums' }}>{formatInr(p.bgmv)}</td>
-                  </tr>
-                </PIDLink>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <ProjectsTable projects={projects} />
       </div>
       <div style={{ height: 8 }} />
     </>

@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { formatCouple, formatInr, riskDotClass } from '@/lib/types/project'
+import { PIDLink } from '@/components/panel/PIDLink'
 
 type PlannerGroup = {
   name: string
@@ -39,10 +40,10 @@ export default async function TeamPage() {
             </div>
             <div>
               {pl.pids.map((p) => (
-                <div
+                <PIDLink
                   key={p.pid}
-                  onClick={() => { window.location.hash = `#pid=${p.pid}` }}
-                  style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0', borderBottom: '1px solid var(--border-subtle)', cursor: 'pointer' }}
+                  pid={p.pid}
+                  style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0', borderBottom: '1px solid var(--border-subtle)' }}
                 >
                   <span style={{ fontFamily: "'Courier New', monospace", fontSize: 11, color: 'var(--text-dim)', minWidth: 52 }}>{p.pid}</span>
                   <span className={`status-dot ${riskDotClass(p.overall_pid_risk)}`} />
@@ -53,7 +54,7 @@ export default async function TeamPage() {
                       : '—'}
                   </span>
                   <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{formatInr(p.bgmv)}</span>
-                </div>
+                </PIDLink>
               ))}
             </div>
           </div>

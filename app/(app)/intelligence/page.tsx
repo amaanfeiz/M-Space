@@ -1,3 +1,5 @@
+'use client'
+
 import { INSIGHTS } from '@/lib/static/insights_static'
 
 export default function IntelligencePage() {
