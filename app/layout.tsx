@@ -30,6 +30,13 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${geist.variable} ${inter.variable} ${nunito.variable}`}>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{var t=localStorage.getItem('theme');if(t==='dark')document.documentElement.setAttribute('data-theme','dark')}catch(e){}`,
+          }}
+        />
+      </head>
       <body>{children}</body>
     </html>
   );
