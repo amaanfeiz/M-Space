@@ -4,30 +4,31 @@ import { SignOutButton } from '@/components/settings/SignOutButton'
 
 export default async function SettingsPage() {
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
   return (
     <>
-      <div style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 18, color: 'var(--text-primary)', marginBottom: 4 }}>
-        Settings
+      <div className="page-header">
+        <div className="page-header-text">
+          <h1>Settings</h1>
+          <p>Account and application preferences.</p>
+        </div>
       </div>
-      <div className="card" style={{ maxWidth: 480 }}>
+      <div className="card" style={{ maxWidth: 480, padding: '20px 24px' }}>
         <div className="eyebrow" style={{ marginBottom: 16 }}>Account</div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', minWidth: 80 }}>Email</div>
-            <div style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight: 500 }}>{user.email}</div>
+        <div>
+          <div className="settings-field">
+            <span className="settings-label">Email</span>
+            <span className="settings-value">{user.email}</span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', minWidth: 80 }}>Role</div>
-            <div style={{ fontSize: 13, color: 'var(--text-primary)' }}>Team Lead</div>
+          <div className="settings-field">
+            <span className="settings-label">Role</span>
+            <span className="settings-value">Team Lead</span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', minWidth: 80 }}>Access</div>
-            <div style={{ fontSize: 13, color: 'var(--text-primary)' }}>Phase 1 — read only</div>
+          <div className="settings-field">
+            <span className="settings-label">Access</span>
+            <span className="settings-value">Phase 1 — read only</span>
           </div>
         </div>
         <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid var(--border-subtle)' }}>

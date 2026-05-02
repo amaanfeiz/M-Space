@@ -120,8 +120,6 @@ export default async function DashboardPage() {
         userInitials={userInitials}
         topProjects={byRisk.slice(0, 3)}
       />
-      <WhatChanged projects={recentlyActive} syncedAt={syncedAt} />
-      {stalled.length > 0 && <StalledProjects projects={stalled} />}
       <ExecutiveBriefing
         projects={projects}
         criticalCount={criticalCount}
@@ -135,10 +133,12 @@ export default async function DashboardPage() {
         criticalCount={criticalCount}
         attentionCount={attentionCount}
       />
-      <div className="panels-row fade-in" style={{ animationDelay: '300ms' }}>
+      {stalled.length > 0 && <StalledProjects projects={stalled} />}
+      <div className="panels-row">
         <TodaysPriorities projects={priorities} />
         <RiskMonitor projects={riskRows} />
       </div>
+      <WhatChanged projects={recentlyActive} syncedAt={syncedAt} />
       <TeamPerformance planners={planners} />
       <ActivityFeed projects={activityProjects} />
     </>

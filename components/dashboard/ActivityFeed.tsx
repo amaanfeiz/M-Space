@@ -1,9 +1,8 @@
 import type { Project } from '@/lib/types/project'
-import { formatCouple } from '@/lib/types/project'
+import { formatCouple, riskDotClass } from '@/lib/types/project'
+import { PIDLink } from '@/components/panel/PIDLink'
 
-type ActivityFeedProps = {
-  projects: Project[]
-}
+type ActivityFeedProps = { projects: Project[] }
 
 function relativeDate(dateStr: string | null): string {
   if (!dateStr) return '—'
@@ -17,47 +16,26 @@ function relativeDate(dateStr: string | null): string {
 function activityText(p: Project): string {
   if (p.current_summary) {
     const sentence = p.current_summary.split('.')[0] ?? p.current_summary
-    return sentence.length > 100 ? sentence.slice(0, 97) + '…' : sentence
+    return sentence.length > 90 ? sentence.slice(0, 87) + '…' : sentence
   }
   return `Last contact with ${formatCouple(p.cx_name)}`
 }
 
 export function ActivityFeed({ projects }: ActivityFeedProps) {
   if (projects.length === 0) return null
-
   return (
-    <div className="card fade-in" style={{ animationDelay: '600ms' }}>
+    <div className="card card--flat fade-in" style={{ animationDelay: '600ms' }}>
       <div className="section-header">
         <div className="eyebrow">Recent Activity</div>
-        <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>
-          synced data
-        </span>
+        <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>synced data</span>
       </div>
       {projects.map((p) => (
-        <div key={p.pid} className="activity-row">
-          <span className="activity-time">
-            {relativeDate(p.last_message_date)}
-          </span>
-          <div
-            className="activity-icon"
-            style={{ background: 'rgba(114,65,190,0.10)' }}
-          >
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="var(--accent)"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-            </svg>
-          </div>
+        <PIDLink key={p.pid} pid={p.pid} className="activity-row">
+          <span className="activity-time">{relativeDate(p.last_message_date)}</span>
+          <span className={`status-dot ${riskDotClass(p.overall_pid_risk)}`} style={{ flexShrink: 0 }} />
           <span className="activity-desc">{activityText(p)}</span>
           <div className="pid-badge">{p.pid}</div>
-        </div>
+        </PIDLink>
       ))}
     </div>
   )

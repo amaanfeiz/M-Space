@@ -1,6 +1,6 @@
 'use client'
 
-import { Search } from 'lucide-react'
+import { ChevronRight, Search } from 'lucide-react'
 import { usePathname } from 'next/navigation'
 import { ThemeToggle } from './ThemeToggle'
 
@@ -30,26 +30,36 @@ function syncLabel(syncedAt: string | null): string {
   return `Last sync: ${Math.floor(mins / 60)}h ago`
 }
 
+function openPalette() {
+  // Synthesize Cmd+K — handled by CommandPalette listener
+  window.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'k', metaKey: true, bubbles: true }),
+  )
+}
+
 export function Topbar({ syncedAt }: { syncedAt?: string | null }) {
   const pathname = usePathname()
   const title = TITLES[pathname] ?? 'Meragi Intel'
   const dotColor = syncPillColor(syncedAt ?? null)
+  const isModKeyMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform)
 
   return (
     <header id="topbar">
-      <div className="page-title">{title}</div>
-      <div className="search-wrap">
-        <div className="search-icon">
-          <Search />
-        </div>
-        <input
-          className="search-input"
-          type="text"
-          placeholder="Search projects, clients, teams…"
-          aria-label="Search"
-        />
-        <span className="search-kbd">⌘K</span>
+      <div className="breadcrumb">
+        <span className="breadcrumb-root">Meragi Intel</span>
+        <ChevronRight className="breadcrumb-sep" />
+        <span className="breadcrumb-current">{title}</span>
       </div>
+      <button
+        type="button"
+        className="search-trigger"
+        onClick={openPalette}
+        aria-label="Open command palette"
+      >
+        <Search className="search-trigger-icon" />
+        <span className="search-trigger-text">Search projects, jump to a page…</span>
+        <span className="search-kbd">{isModKeyMac ? '⌘' : 'Ctrl'} K</span>
+      </button>
       <div className="topbar-right">
         <div className="topbar-divider" />
         <div className="sync-pill">

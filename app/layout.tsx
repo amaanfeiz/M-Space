@@ -29,7 +29,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${geist.variable} ${inter.variable} ${nunito.variable}`}>
+    <html lang="en" className={`${geist.variable} ${inter.variable} ${nunito.variable}`} suppressHydrationWarning>
       <head>
         <script
           dangerouslySetInnerHTML={{

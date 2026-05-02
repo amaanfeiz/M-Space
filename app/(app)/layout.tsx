@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { Sidebar } from '@/components/shell/Sidebar'
 import { Topbar } from '@/components/shell/Topbar'
+import { CommandPalette } from '@/components/shell/CommandPalette'
 import { DetailPanel } from '@/components/panel/DetailPanel'
 import { createClient } from '@/lib/supabase/server'
 
@@ -44,6 +45,12 @@ export default async function AppLayout({
     .maybeSingle()
   const syncedAt = syncLog?.created_at ?? null
 
+  // Lightweight project list for command palette
+  const { data: paletteRows } = await supabase
+    .from('projects')
+    .select('pid, cx_name, status')
+    .order('pid', { ascending: true })
+
   return (
     <>
       <Sidebar userName={name} userInitials={initials} userRole="Team Lead" />
@@ -54,6 +61,7 @@ export default async function AppLayout({
         </div>
       </div>
       <DetailPanel />
+      <CommandPalette projects={paletteRows ?? []} />
     </>
   )
 }

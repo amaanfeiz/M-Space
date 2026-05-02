@@ -1,7 +1,7 @@
 'use client'
 
 import { X } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { PID_DATA } from '@/lib/static/pid_data_static'
 import { formatInr } from '@/lib/types/project'
@@ -131,9 +131,12 @@ function VendorSection({ s }: { s: StaticPID }) {
       <SectionTitle>Vendor Coverage</SectionTitle>
       <div className="vendor-grid">
         {s.vendor_coverage.map((v, i) => (
-          <div key={i} className={`vendor-pill ${v.status}`} title={v.note}>
-            <span>{icon[v.status] ?? '·'}</span>
-            <span>{v.vendor_type}</span>
+          <div key={i} className="vendor-pill-wrap">
+            <div className={`vendor-pill ${v.status}`}>
+              <span>{icon[v.status] ?? '·'}</span>
+              <span>{v.vendor_type}</span>
+            </div>
+            {v.note && <div className="vendor-tooltip">{v.note}</div>}
           </div>
         ))}
       </div>
@@ -250,9 +253,29 @@ function MoneySection({ p }: { p: DBProject; s: StaticPID | null }) {
   )
 }
 
+function PanelSkeleton() {
+  return (
+    <div className="panel-skeleton">
+      <div className="panel-skeleton-strip skeleton-banner" />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div className="panel-skeleton-line w-80 skeleton-banner" style={{ height: 13 }} />
+        <div className="panel-skeleton-line w-60 skeleton-banner" style={{ height: 13 }} />
+        <div className="panel-skeleton-line w-40 skeleton-banner" style={{ height: 13 }} />
+      </div>
+      <div className="panel-skeleton-strip skeleton-banner" style={{ height: 60 }} />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div className="panel-skeleton-line w-80 skeleton-banner" style={{ height: 13 }} />
+        <div className="panel-skeleton-line w-60 skeleton-banner" style={{ height: 13 }} />
+      </div>
+    </div>
+  )
+}
+
 export function DetailPanel() {
   const [openPid, setOpenPid] = useState<string | null>(null)
   const [project, setProject] = useState<DBProject | null>(null)
+  const [activeSection, setActiveSection] = useState('section-status')
+  const bodyRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     function onHashChange() {
@@ -297,10 +320,43 @@ export function DetailPanel() {
     return () => window.removeEventListener('keydown', onKey)
   }, [openPid])
 
+  const scrollToSection = useCallback((id: string) => {
+    const el = bodyRef.current?.querySelector(`#${id}`)
+    el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [])
+
+  useEffect(() => {
+    const body = bodyRef.current
+    if (!body || !openPid) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) setActiveSection(e.target.id)
+        }
+      },
+      { root: body, threshold: 0.3, rootMargin: '-40px 0px -50% 0px' },
+    )
+    const sections = body.querySelectorAll('[data-section]')
+    sections.forEach((s) => observer.observe(s))
+    return () => observer.disconnect()
+  }, [openPid, project])
+
   const staticData = openPid ? (PID_DATA[openPid] ?? null) : null
   const isLoading = openPid !== null && (project === null || String(project.pid) !== openPid)
   const riskLevel = project?.overall_pid_risk ?? staticData?.statusLevel ?? null
   const days = daysUntil(project?.event_start_date ?? null)
+  const riskColor = levelColor(riskLevel)
+
+  const hasAnalysis = !!(staticData?.analysis?.length || project?.current_summary || project?.ai_notes_summary)
+  const navItems = [
+    { id: 'section-status', label: 'Status', always: true },
+    { id: 'section-analysis', label: 'Analysis', always: hasAnalysis },
+    { id: 'section-team', label: 'Team', always: !!staticData },
+    { id: 'section-money', label: 'Money', always: true },
+    { id: 'section-vendor', label: 'Vendor', always: !!staticData },
+    { id: 'section-actions', label: 'Actions', always: !!staticData },
+    { id: 'section-messages', label: 'Messages', always: !!staticData },
+  ].filter((n) => n.always)
 
   return (
     <>
@@ -314,87 +370,108 @@ export function DetailPanel() {
                 <div className="panel-couple">
                   {project?.cx_name?.replace(' & ', ' · ') ?? staticData?.couple ?? '—'}
                 </div>
+                {project?.venue && (
+                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>{project.venue}</div>
+                )}
               </div>
-              <button className="panel-close" onClick={close} type="button">
+              <button className="panel-close" onClick={close} type="button" aria-label="Close panel">
                 <X style={{ width: 13, height: 13 }} />
               </button>
+              <div
+                className="panel-header-risk-bar"
+                style={{ background: `linear-gradient(90deg, ${riskColor} 0%, ${riskColor}40 50%, transparent 100%)` }}
+              />
             </div>
-            <div className="panel-body">
-              {isLoading && (
-                <div style={{ color: 'var(--text-dim)', fontSize: 13 }}>Loading…</div>
-              )}
+
+            {!isLoading && project && (
+              <nav className="panel-section-nav" aria-label="Panel sections">
+                {navItems.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={`panel-nav-btn${activeSection === item.id ? ' active' : ''}`}
+                    onClick={() => scrollToSection(item.id)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </nav>
+            )}
+
+            <div className="panel-body" ref={bodyRef}>
+              {isLoading && <PanelSkeleton />}
               {!isLoading && project && (
                 <>
-                  {/* Status strip */}
-                  <div className="panel-strip-row">
-                    {days !== null && (
-                      <div>
-                        <div className="panel-days-countdown" style={{ color: levelColor(riskLevel) }}>
-                          {days}
+                  <div id="section-status" data-section className="panel-section-anchor">
+                    <div className="panel-strip-row">
+                      {days !== null && (
+                        <div>
+                          <div className="panel-days-countdown" style={{ color: riskColor }}>{days}</div>
+                          <div className="panel-days-label">Days to event</div>
                         </div>
-                        <div className="panel-days-label">Days to event</div>
+                      )}
+                      <div className="panel-health-badge">
+                        <div style={{ width: 10, height: 10, borderRadius: '50%', background: riskColor, boxShadow: `0 0 8px ${riskColor}40` }} />
+                        <div style={{ fontSize: 9, color: 'var(--text-dim)', marginTop: 3, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                          {riskLevel ?? 'unknown'}
+                        </div>
                       </div>
-                    )}
-                    <div className="panel-health-badge">
-                      <div style={{ width: 10, height: 10, borderRadius: '50%', background: levelColor(riskLevel), boxShadow: `0 0 8px ${levelColor(riskLevel)}40` }} />
-                      <div style={{ fontSize: 9, color: 'var(--text-dim)', marginTop: 3, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                        {riskLevel ?? 'unknown'}
-                      </div>
+                      {staticData && (
+                        <div className="risk-pills">
+                          {staticData.risk_vectors.map((r, i) => (
+                            <span key={i} className={`risk-pill ${r.severity}`}>{r.label}</span>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                    {staticData && (
-                      <div className="risk-pills">
-                        {staticData.risk_vectors.map((r, i) => (
-                          <span key={i} className={`risk-pill ${r.severity}`}>{r.label}</span>
-                        ))}
-                      </div>
-                    )}
                   </div>
 
-                  {/* AI Analysis */}
-                  {staticData?.analysis && staticData.analysis.length > 0 && (
-                    <div>
+                  {hasAnalysis && (
+                    <div id="section-analysis" data-section className="panel-section-anchor">
                       <SectionTitle ai>AI Analysis</SectionTitle>
                       <div className="panel-analysis">
-                        {staticData.analysis.map((para, i) => (
+                        {staticData?.analysis?.map((para, i) => (
                           <p key={i} dangerouslySetInnerHTML={{ __html: para }} />
                         ))}
-                      </div>
-                    </div>
-                  )}
-                  {!staticData && (project.current_summary || project.ai_notes_summary) && (
-                    <div>
-                      <SectionTitle ai>AI Analysis</SectionTitle>
-                      <div className="panel-analysis">
-                        {project.current_summary && <p>{project.current_summary}</p>}
-                        {project.ai_notes_summary && <p>{project.ai_notes_summary}</p>}
+                        {!staticData && project.current_summary && <p>{project.current_summary}</p>}
+                        {!staticData && project.ai_notes_summary && <p>{project.ai_notes_summary}</p>}
                       </div>
                     </div>
                   )}
 
                   <div className="panel-2col">
                     <div className="panel-col">
-                      {/* Team status — static only */}
-                      {staticData && <TeamSection s={staticData} />}
-                      {/* Comms — static only */}
+                      {staticData && (
+                        <div id="section-team" data-section className="panel-section-anchor">
+                          <TeamSection s={staticData} />
+                        </div>
+                      )}
                       {staticData && <CommsSection s={staticData} />}
-                      {/* Money — DB */}
-                      <MoneySection p={project} s={staticData} />
+                      <div id="section-money" data-section className="panel-section-anchor">
+                        <MoneySection p={project} s={staticData} />
+                      </div>
                     </div>
                     <div className="panel-col">
-                      {/* Vendor — static only */}
-                      {staticData && <VendorSection s={staticData} />}
-                      {/* Decision intel — static only */}
+                      {staticData && (
+                        <div id="section-vendor" data-section className="panel-section-anchor">
+                          <VendorSection s={staticData} />
+                        </div>
+                      )}
                       {staticData && <DecisionSection s={staticData} />}
-                      {/* Actions — static only */}
-                      {staticData && <ActionsSection s={staticData} />}
+                      {staticData && (
+                        <div id="section-actions" data-section className="panel-section-anchor">
+                          <ActionsSection s={staticData} />
+                        </div>
+                      )}
                     </div>
                   </div>
 
-                  {/* Messages — static only */}
-                  {staticData && <MessagesSection s={staticData} />}
-                  {/* TL Directive — static only */}
+                  {staticData && (
+                    <div id="section-messages" data-section className="panel-section-anchor">
+                      <MessagesSection s={staticData} />
+                    </div>
+                  )}
                   {staticData && <TLDirectiveSection s={staticData} />}
-                  {/* Suggested Reply — static only */}
                   {staticData && <SuggestedReplySection s={staticData} />}
                 </>
               )}

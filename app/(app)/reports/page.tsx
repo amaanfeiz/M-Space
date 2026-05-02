@@ -11,17 +11,18 @@ export default async function ReportsPage() {
 
   return (
     <>
-      <div style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 18, color: 'var(--text-primary)', marginBottom: 4 }}>
-        Reports
-      </div>
-      <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 24 }}>
-        Portfolio exports — Phase 1.
-      </div>
-      <div className="card" style={{ maxWidth: 480 }}>
-        <div className="eyebrow" style={{ marginBottom: 8 }}>Portfolio CSV</div>
-        <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>
-          Export all {projects.length} active PIDs with status, team, risk, and BGMV.
+      <div className="page-header">
+        <div className="page-header-text">
+          <h1>Reports</h1>
+          <p>Portfolio exports — Phase 1.</p>
         </div>
+        <span className="page-header-badge">Phase 1</span>
+      </div>
+      <div className="card reports-export-card">
+        <div className="eyebrow" style={{ marginBottom: 8 }}>Portfolio CSV</div>
+        <p className="reports-desc">
+          Export all {projects.length} active PIDs with status, team, risk, and BGMV.
+        </p>
         <CSVExportButton projects={projects} />
       </div>
     </>

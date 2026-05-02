@@ -39,8 +39,9 @@ export function Sidebar({ userName, userInitials, userRole }: SidebarProps) {
   const pathname = usePathname()
 
   return (
-    <aside id="sidebar">
+    <aside id="sidebar" className="sidebar-rail" aria-label="Primary navigation">
       <div className="sidebar-logo">
+        <span className="brand-dot" aria-hidden />
         <span className="logo-text">Meragi</span>
       </div>
       <nav className="sidebar-nav">
@@ -51,9 +52,11 @@ export function Sidebar({ userName, userInitials, userRole }: SidebarProps) {
               key={href}
               href={href}
               className={`nav-item${active ? ' active' : ''}`}
+              aria-label={label}
+              title={label}
             >
               <Icon />
-              {label}
+              <span className="nav-label">{label}</span>
               {beta && <span className="nav-beta">BETA</span>}
             </Link>
           )
@@ -64,15 +67,17 @@ export function Sidebar({ userName, userInitials, userRole }: SidebarProps) {
           href="/settings"
           className={`nav-item${pathname === '/settings' ? ' active' : ''}`}
           style={{ color: 'var(--text-dim)' }}
+          aria-label="Settings"
+          title="Settings"
         >
           <SettingsIcon />
-          Settings
+          <span className="nav-label">Settings</span>
         </Link>
       </div>
       <div className="sidebar-bottom">
-        <div className="user-card">
+        <div className="user-card" title={`${userName} · ${userRole}`}>
           <div className="avatar">{userInitials}</div>
-          <div>
+          <div className="user-meta">
             <div className="user-name">{userName}</div>
             <div className="user-role">{userRole}</div>
           </div>

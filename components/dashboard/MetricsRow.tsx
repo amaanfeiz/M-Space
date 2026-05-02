@@ -1,10 +1,4 @@
-type Metric = {
-  label: string
-  value: string
-  dot?: 'critical' | 'attention' | null
-  change: string
-  changeType: 'good' | 'bad' | 'neutral'
-}
+import { AnimatedCounter } from './AnimatedCounter'
 
 type MetricsRowProps = {
   livePids: number
@@ -19,55 +13,43 @@ export function MetricsRow({
   criticalCount,
   attentionCount,
 }: MetricsRowProps) {
-  const metrics: Metric[] = [
-    {
-      label: 'Live Projects',
-      value: String(livePids),
-      change: 'Booked and active',
-      changeType: 'neutral',
-    },
-    {
-      label: 'Total BGMV',
-      value: totalBgmv,
-      change: 'Across your portfolio',
-      changeType: 'neutral',
-    },
-    {
-      label: 'Critical',
-      value: String(criticalCount),
-      dot: 'critical',
-      change: criticalCount > 0 ? 'Needs immediate attention' : 'No critical risks',
-      changeType: criticalCount > 0 ? 'bad' : 'neutral',
-    },
-    {
-      label: 'Attention',
-      value: String(attentionCount),
-      dot: 'attention',
-      change: attentionCount > 0 ? `${attentionCount} items to watch` : 'No attention items',
-      changeType: attentionCount > 0 ? 'bad' : 'neutral',
-    },
-  ]
-
   return (
-    <div className="metrics-row">
-      {metrics.map((m, i) => (
-        <div
-          key={m.label}
-          className="card fade-in"
-          style={{ animationDelay: `${i * 50}ms` }}
-        >
-          <div className="metric-label">{m.label}</div>
-          <div className="metric-number">
-            {m.dot && (
-              <span className={`status-dot dot-${m.dot}`} />
-            )}
-            {m.value}
-          </div>
-          <div className={`metric-change change-${m.changeType}`}>
-            {m.change}
-          </div>
+    <div className="metrics-bento">
+      <div className="card metric-card stagger-1">
+        <div className="metric-label">Live Projects</div>
+        <div className="metric-number">
+          <AnimatedCounter value={livePids} />
         </div>
-      ))}
+        <div className="metric-change change-neutral">Booked and active</div>
+      </div>
+
+      <div className="card metric-card stagger-2">
+        <div className="metric-label">Total BGMV</div>
+        <div className="metric-number metric-number--sm">{totalBgmv}</div>
+        <div className="metric-change change-neutral">Across your portfolio</div>
+      </div>
+
+      <div className={`card metric-card stagger-3${criticalCount > 0 ? ' metric-card--critical' : ''}`}>
+        <div className="metric-label">Critical</div>
+        <div className="metric-number">
+          <span className="status-dot dot-critical" style={{ marginRight: 8 }} />
+          <AnimatedCounter value={criticalCount} />
+        </div>
+        <div className={`metric-change ${criticalCount > 0 ? 'change-bad' : 'change-neutral'}`}>
+          {criticalCount > 0 ? 'Needs immediate attention' : 'No critical risks'}
+        </div>
+      </div>
+
+      <div className={`card metric-card stagger-4${attentionCount > 0 ? ' metric-card--attention' : ''}`}>
+        <div className="metric-label">Attention</div>
+        <div className="metric-number">
+          <span className="status-dot dot-attention" style={{ marginRight: 8 }} />
+          <AnimatedCounter value={attentionCount} />
+        </div>
+        <div className={`metric-change ${attentionCount > 0 ? 'change-bad' : 'change-neutral'}`}>
+          {attentionCount > 0 ? `${attentionCount} items to watch` : 'No attention items'}
+        </div>
+      </div>
     </div>
   )
 }

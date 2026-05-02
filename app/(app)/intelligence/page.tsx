@@ -122,7 +122,7 @@ function InsightCard({ ins }: { ins: (typeof INSIGHTS)[number] }) {
                     {item.pid && (
                       <span
                         style={{
-                          fontFamily: "'Courier New', monospace",
+                          fontFamily: 'var(--font-mono)',
                           fontSize: 11,
                           color: 'var(--text-dim)',
                           fontVariantNumeric: 'tabular-nums',
@@ -193,40 +193,12 @@ function InsightCard({ ins }: { ins: (typeof INSIGHTS)[number] }) {
 export default function IntelligencePage() {
   return (
     <>
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        }}
-      >
-        <div>
-          <div
-            style={{
-              fontFamily: 'var(--font-display)',
-              fontSize: 18,
-              fontWeight: 600,
-              color: 'var(--text-primary)',
-              letterSpacing: '-0.02em',
-            }}
-          >
-            Portfolio Intelligence
-          </div>
-          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 2 }}>
-            Structural signals and pattern analysis across your active projects
-          </div>
+      <div className="page-header">
+        <div className="page-header-text">
+          <h1>Intelligence</h1>
+          <p>Structural signals and pattern analysis across your active projects.</p>
         </div>
-        <div
-          style={{
-            fontSize: 11,
-            color: 'var(--text-dim)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: 'var(--radius-btn)',
-            padding: '4px 10px',
-          }}
-        >
-          synced data
-        </div>
+        <span className="page-header-badge">synced data</span>
       </div>
 
       <div className="insight-grid">
