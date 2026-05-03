@@ -1,12 +1,24 @@
 import { Client, LocalAuth } from 'whatsapp-web.js';
 import qrcode from 'qrcode-terminal';
+import { createClient } from '@supabase/supabase-js';
+import { config } from 'dotenv';
+import { resolve } from 'path';
 
-// Client groups always contain "PID: <number>" anywhere in the title
+// Load env from parent project's .env.local
+config({ path: resolve(process.cwd(), '../../.env.local') });
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+);
+
+// Client groups contain "PID : <number>" or "PID: <number>" anywhere in the title
 const CLIENT_PATTERN = /\bPID\s*:\s*(\d{4,6})\b/i;
-// Internal groups (95%) start with "<region> - <pid> - ..." where region is HP/RJ/Jaipur/Udaipur/Kerala/etc.
+// Internal groups start with "<region> - <pid> - ..." (HP/RJ/Jaipur/Udaipur/Kerala/etc.)
 const INTERNAL_PATTERN = /^[A-Za-z][A-Za-z\s]*\s*-\s*(\d{4,6})\b/;
 
 const DEMO_PIDS = ['24292', '28172', '33798'];
+const MESSAGE_LIMIT = 200;
 
 const CHROME_PATH =
   process.env.CHROME_PATH ?? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
@@ -36,6 +48,48 @@ wa.on('auth_failure', (msg) => {
   process.exit(1);
 });
 
+async function scrapeAndStore(
+  pid: string,
+  groupType: 'client' | 'internal',
+  groupName: string,
+  chat: Awaited<ReturnType<typeof wa.getChatById>>,
+) {
+  console.log(`  Fetching ${MESSAGE_LIMIT} messages from: ${groupName}`);
+  const messages = await chat.fetchMessages({ limit: MESSAGE_LIMIT });
+
+  const rows = messages
+    .filter((m) => m.type === 'chat' || m.hasMedia)
+    .map((m) => ({
+      pid: parseInt(pid, 10),
+      group_type: groupType,
+      group_name: groupName,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      wa_message_id: (m.id as any)._serialized as string,
+      sender_wa_id: m.author ?? m.from,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      sender_name: (m as any)._data?.notifyName ?? null,
+      body: m.body || null,
+      message_type: m.type,
+      has_media: m.hasMedia,
+      sent_at: new Date(m.timestamp * 1000).toISOString(),
+    }));
+
+  if (rows.length === 0) {
+    console.log(`    No messages to write.`);
+    return;
+  }
+
+  const { error } = await supabase
+    .from('whatsapp_messages')
+    .upsert(rows, { onConflict: 'wa_message_id', ignoreDuplicates: true });
+
+  if (error) {
+    console.error(`    ERROR: ${error.message}`);
+  } else {
+    console.log(`    Wrote ${rows.length} messages.`);
+  }
+}
+
 wa.on('ready', async () => {
   console.log('Logged in. Waiting 5s for chat sync to settle...');
   await new Promise((r) => setTimeout(r, 5000));
@@ -44,17 +98,17 @@ wa.on('ready', async () => {
   const chats = await wa.getChats();
   const groupChats = chats.filter((c) => c.isGroup);
 
-  const clientGroups: Array<{ name: string; pid: string }> = [];
-  const internalGroups: Array<{ name: string; pid: string }> = [];
+  const clientGroups: Array<{ name: string; pid: string; chat: typeof groupChats[0] }> = [];
+  const internalGroups: Array<{ name: string; pid: string; chat: typeof groupChats[0] }> = [];
 
   for (const chat of groupChats) {
     const clientMatch = chat.name.match(CLIENT_PATTERN);
     const internalMatch = chat.name.match(INTERNAL_PATTERN);
 
     if (internalMatch) {
-      internalGroups.push({ name: chat.name, pid: internalMatch[1] });
+      internalGroups.push({ name: chat.name, pid: internalMatch[1], chat });
     } else if (clientMatch) {
-      clientGroups.push({ name: chat.name, pid: clientMatch[1] });
+      clientGroups.push({ name: chat.name, pid: clientMatch[1], chat });
     }
   }
 
@@ -74,13 +128,20 @@ wa.on('ready', async () => {
     if (ig) console.log(`    -> ${ig.name}`);
   }
 
-  if (clientGroups.length > 0 || internalGroups.length > 0) {
-    console.log('\nFirst 3 client groups:');
-    clientGroups.slice(0, 3).forEach((g) => console.log(`  PID ${g.pid}: ${g.name}`));
-    console.log('\nFirst 3 internal groups:');
-    internalGroups.slice(0, 3).forEach((g) => console.log(`  PID ${g.pid}: ${g.name}`));
+  console.log('\n--- Scraping messages for demo PIDs ---');
+  for (const pid of DEMO_PIDS) {
+    console.log(`\nPID ${pid}:`);
+    const cg = clientGroups.find((g) => g.pid === pid);
+    const ig = internalGroups.find((g) => g.pid === pid);
+
+    if (cg) await scrapeAndStore(pid, 'client', cg.name, cg.chat);
+    else console.log(`  No client group found — skipping.`);
+
+    if (ig) await scrapeAndStore(pid, 'internal', ig.name, ig.chat);
+    else console.log(`  No internal group found — skipping.`);
   }
 
+  console.log('\nDone. Exiting.');
   await wa.destroy();
   process.exit(0);
 });
