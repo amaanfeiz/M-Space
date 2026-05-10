@@ -61,7 +61,9 @@ async function scrapeAndStore(
     .filter((m) => m.type === 'chat' || m.hasMedia)
     .map((m) => ({
       pid: parseInt(pid, 10),
-      group_type: groupType,
+      source_type: 'whatsapp' as const,
+      source: 'scraper' as const,
+      chat_type: groupType,
       group_name: groupName,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       wa_message_id: (m.id as any)._serialized as string,
@@ -80,7 +82,7 @@ async function scrapeAndStore(
   }
 
   const { error } = await supabase
-    .from('whatsapp_messages')
+    .from('signals')
     .upsert(rows, { onConflict: 'wa_message_id', ignoreDuplicates: true });
 
   if (error) {
