@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // WhatsApp Web session bundle — minified vendor JS, never our code.
+    "scripts/whatsapp-scraper/.wwebjs_auth/**",
+    "scripts/whatsapp-scraper/.wwebjs_cache/**",
   ]),
 ]);
 

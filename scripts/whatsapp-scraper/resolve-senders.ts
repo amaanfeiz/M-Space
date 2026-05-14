@@ -225,7 +225,7 @@ async function main() {
   const manualQueue: Array<{ pid: number; sender_name: string }> = [];
   const now = new Date().toISOString();
 
-  let passCount = { projects: 0, haiku: 0, unknown: 0 };
+  const passCount = { projects: 0, haiku: 0, unknown: 0 };
 
   for (const [pid, senders] of byPid) {
     const { data: project } = await supabase

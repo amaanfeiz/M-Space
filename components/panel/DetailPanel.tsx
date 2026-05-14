@@ -300,8 +300,11 @@ export function DetailPanel() {
     return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
 
-  // Fetch project data
+  // Fetch project data. The synchronous setState-on-null clears panel
+  // state when the user closes the panel; the panel is hidden while this
+  // runs so there's no cascading-render risk.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!openPid) { setProject(null); return }
     const supabase = createClient()
     supabase
@@ -314,8 +317,9 @@ export function DetailPanel() {
       })
   }, [openPid])
 
-  // Fetch latest brief for this PID
+  // Fetch latest brief for this PID. See note above for the setState pattern.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!openPid) { setBrief(null); return }
     setBriefLoading(true)
     const supabase = createClient()
