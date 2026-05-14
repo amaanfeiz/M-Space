@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { config } from 'dotenv';
 import { resolve } from 'path';
 import { writeFileSync, mkdirSync } from 'fs';
+import { ALL_AMAAN_PIDS as ALL_AMAAN_PIDS_RO } from './all-pids';
 
 config({ path: resolve(process.cwd(), '../../.env.local') });
 
@@ -21,11 +22,7 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const VAULT_PATH =
   process.env.VAULT_PATH ?? 'C:\\Users\\Amaan\\Obsidian\\Meragi-Intel';
 
-const ALL_AMAAN_PIDS = [
-  24292, 28172, 33798, 19935, 20614, 24202, 24401, 25210, 26903, 30646,
-  30969, 32125, 29662, 32245, 33487, 31341, 23671, 28438, 28166, 29568,
-  28698, 21491, 33797, 28625, 30731, 33673, 33565, 31574, 33313, 33867, 34002,
-];
+const ALL_AMAAN_PIDS = [...ALL_AMAAN_PIDS_RO];
 
 // --- CLI args ---
 const args = process.argv.slice(2);

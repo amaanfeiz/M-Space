@@ -3,6 +3,7 @@ import qrcode from 'qrcode-terminal';
 import { createClient } from '@supabase/supabase-js';
 import { config } from 'dotenv';
 import { resolve } from 'path';
+import { ALL_AMAAN_PIDS_STR } from './all-pids';
 
 // Load env from parent project's .env.local
 config({ path: resolve(process.cwd(), '../../.env.local') });
@@ -20,16 +21,8 @@ const CLIENT_PATTERN = /\bPID\s*:?\s*(\d{4,6})\b/i;
 // "RJ_PID-32245_..." (old underscore format — \b fails here since _ is \w, use (?!\d) instead).
 const INTERNAL_PATTERN = /^[A-Za-z][A-Za-z\s/\-_]*?(\d{4,6})(?!\d)/;
 
-// All 31 active PIDs where Amaan is TL/planner/designer/PM (as of 2026-05-11)
-const ALL_AMAAN_PIDS = [
-  // 20 with existing export data
-  '24292', '28172', '33798', '19935', '20614', '24202', '24401',
-  '25210', '26903', '30646', '30969', '32125', '29662', '32245',
-  '33487', '31341', '23671', '28438', '28166', '29568',
-  // 11 with no data yet
-  '28698', '21491', '33797', '28625', '30731', '33673',
-  '33565', '31574', '33313', '33867', '34002',
-];
+// Shared source of truth — see ./all-pids.ts. Update PIDs there.
+const ALL_AMAAN_PIDS = [...ALL_AMAAN_PIDS_STR];
 
 // CLI: pass specific PIDs as args (e.g. npx tsx index.ts 28698 21491), or run all if none given
 const cliPids = process.argv.slice(2).filter((a) => /^\d+$/.test(a));
@@ -70,7 +63,7 @@ async function scrapeAndStore(
   groupType: 'client' | 'internal',
   groupName: string,
   chat: Awaited<ReturnType<typeof wa.getChatById>>,
-) {
+): Promise<{ attempted: number; errored: boolean }> {
   console.log(`  Fetching ${MESSAGE_LIMIT} messages from: ${groupName}`);
   const messages = await chat.fetchMessages({ limit: MESSAGE_LIMIT });
 
@@ -95,7 +88,7 @@ async function scrapeAndStore(
 
   if (rows.length === 0) {
     console.log(`    No messages to write.`);
-    return;
+    return { attempted: 0, errored: false };
   }
 
   const { error } = await supabase
@@ -104,9 +97,10 @@ async function scrapeAndStore(
 
   if (error) {
     console.error(`    ERROR: ${error.message}`);
-  } else {
-    console.log(`    Wrote ${rows.length} messages.`);
+    return { attempted: rows.length, errored: true };
   }
+  console.log(`    Wrote ${rows.length} messages.`);
+  return { attempted: rows.length, errored: false };
 }
 
 wa.on('ready', async () => {
@@ -157,6 +151,7 @@ wa.on('ready', async () => {
   }
 
   console.log('\n--- Scraping messages ---');
+  const perPid = new Map<string, { client: number; internal: number; errored: boolean }>();
   for (const pid of TARGET_PIDS) {
     if (neitherFound.includes(pid)) continue;
 
@@ -164,11 +159,48 @@ wa.on('ready', async () => {
     const cg = clientGroups.find((g) => g.pid === pid);
     const ig = internalGroups.find((g) => g.pid === pid);
 
-    if (cg) await scrapeAndStore(pid, 'client', cg.name, cg.chat);
-    else console.log(`  No client group found.`);
+    const tally = { client: 0, internal: 0, errored: false };
+    if (cg) {
+      const r = await scrapeAndStore(pid, 'client', cg.name, cg.chat);
+      tally.client = r.attempted;
+      if (r.errored) tally.errored = true;
+    } else console.log(`  No client group found.`);
 
-    if (ig) await scrapeAndStore(pid, 'internal', ig.name, ig.chat);
-    else console.log(`  No internal group found.`);
+    if (ig) {
+      const r = await scrapeAndStore(pid, 'internal', ig.name, ig.chat);
+      tally.internal = r.attempted;
+      if (r.errored) tally.errored = true;
+    } else console.log(`  No internal group found.`);
+
+    perPid.set(pid, tally);
+  }
+
+  // --- Run summary ---
+  const totalRows = [...perPid.values()].reduce((s, t) => s + t.client + t.internal, 0);
+  const scrapedPids = [...perPid.entries()].filter(([, t]) => t.client + t.internal > 0).length;
+  const erroredPids = [...perPid.entries()].filter(([, t]) => t.errored).map(([pid]) => pid);
+  const zeroPids = [...perPid.entries()]
+    .filter(([, t]) => t.client + t.internal === 0)
+    .map(([pid]) => pid);
+
+  console.log(`\n=== Run summary ===`);
+  console.log(`Target PIDs:           ${TARGET_PIDS.length}`);
+  console.log(`Groups found:          client=${clientGroups.length}  internal=${internalGroups.length}`);
+  console.log(`PIDs with messages:    ${scrapedPids}/${TARGET_PIDS.length}`);
+  console.log(`Total rows attempted:  ${totalRows} (duplicates collapsed by ON CONFLICT)`);
+  if (neitherFound.length > 0) {
+    console.log(`No matching groups:    ${neitherFound.join(', ')}`);
+  }
+  if (zeroPids.length > 0) {
+    console.log(`Had group but 0 msgs:  ${zeroPids.join(', ')}`);
+  }
+  if (erroredPids.length > 0) {
+    console.log(`DB write errored:      ${erroredPids.join(', ')}`);
+  }
+  if (totalRows === 0 && (clientGroups.length > 0 || internalGroups.length > 0)) {
+    console.log(`\nWARNING: groups found but zero messages scraped.`);
+    console.log(`  WhatsApp Web may not have synced. Try: close Chrome, run again.`);
+    console.log(`  If session expired (14d inactive), QR rescan will be requested.`);
   }
 
   console.log('\nDone. Exiting.');
