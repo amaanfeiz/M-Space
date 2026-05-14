@@ -36,15 +36,23 @@ export default async function ProjectsPage() {
 
   const projects = data ?? []
 
-  // Latest brief per PID
+  // Latest brief per PID. "Actions" rolls up urgent items the user is on
+  // the hook for: needs_you + unacknowledged_requests. Cross-source flags
+  // remain a separate count since they describe data discrepancies, not
+  // an action queue.
   const briefMap = new Map<number, BriefSummary>()
   for (const b of briefRows ?? []) {
     if (briefMap.has(b.pid)) continue
-    const j = b.brief_json as { client_pulse?: { sentiment?: string }; cross_source_flags?: unknown[]; needs_you?: unknown[] }
+    const j = b.brief_json as {
+      client_pulse?: { sentiment?: string }
+      cross_source_flags?: unknown[]
+      needs_you?: unknown[]
+      unacknowledged_requests?: unknown[]
+    }
     briefMap.set(b.pid, {
       sentiment: j?.client_pulse?.sentiment ?? '',
       flags: j?.cross_source_flags?.length ?? 0,
-      actions: j?.needs_you?.length ?? 0,
+      actions: (j?.needs_you?.length ?? 0) + (j?.unacknowledged_requests?.length ?? 0),
     })
   }
 

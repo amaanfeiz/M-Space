@@ -23,6 +23,12 @@ export interface BriefJSON {
     status: 'open' | 'done' | 'overdue' | 'unclear'
   }>
   needs_you: Array<{ action: string; priority: 'urgent' | 'soon' | 'when_able' }>
+  unacknowledged_requests?: Array<{
+    request: string
+    asked_by: string
+    asked_on: string
+    days_unanswered: number
+  }>
   open_questions: { clarification_message: string } | Array<{ question: string; draft_message: string }>
   cross_source_flags: Array<{ flag: string; chat_says: string; tracker_says: string }>
 }
@@ -120,6 +126,39 @@ export function BriefBody({ brief, briefDate, isCatchup }: { brief: BriefJSON; b
                   {c.due ? ` · by ${c.due}` : ''}
                 </span>
               </span>
+            </div>
+          ))}
+        </Section>
+      )}
+
+      {/* Unacknowledged client requests — most critical category */}
+      {brief.unacknowledged_requests && brief.unacknowledged_requests.length > 0 && (
+        <Section title="Unacknowledged client requests">
+          {brief.unacknowledged_requests.map((r, i) => (
+            <div
+              key={i}
+              style={{
+                fontSize: 12,
+                color: 'var(--text-muted)',
+                marginBottom: 6,
+                padding: '6px 10px',
+                background: 'var(--surface-elevated)',
+                borderLeft: '3px solid var(--critical)',
+                borderRadius: 4,
+                lineHeight: 1.5,
+              }}
+            >
+              <div style={{ display: 'flex', gap: 6, alignItems: 'baseline', marginBottom: 2 }}>
+                <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--critical)', textTransform: 'uppercase', flexShrink: 0 }}>
+                  Unanswered {r.days_unanswered}d
+                </span>
+              </div>
+              <div style={{ color: 'var(--text-primary)' }}>
+                &ldquo;{r.request}&rdquo;
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
+                {r.asked_by} · {r.asked_on}
+              </div>
             </div>
           ))}
         </Section>

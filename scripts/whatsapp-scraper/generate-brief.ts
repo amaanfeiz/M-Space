@@ -69,6 +69,12 @@ interface BriefJSON {
     action: string;
     priority: 'urgent' | 'soon' | 'when_able';
   }>;
+  unacknowledged_requests: Array<{
+    request: string;
+    asked_by: string;
+    asked_on: string;
+    days_unanswered: number;
+  }>;
   open_questions: {
     clarification_message: string;
   };
@@ -135,6 +141,20 @@ const BRIEF_SCHEMA = {
         additionalProperties: false,
       },
     },
+    unacknowledged_requests: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          request: { type: 'string' },
+          asked_by: { type: 'string' },
+          asked_on: { type: 'string' },
+          days_unanswered: { type: 'integer' },
+        },
+        required: ['request', 'asked_by', 'asked_on', 'days_unanswered'],
+        additionalProperties: false,
+      },
+    },
     open_questions: {
       type: 'object',
       properties: {
@@ -157,7 +177,7 @@ const BRIEF_SCHEMA = {
       },
     },
   },
-  required: ['client_pulse', 'team_status', 'what_changed', 'commitments', 'needs_you', 'open_questions', 'cross_source_flags'],
+  required: ['client_pulse', 'team_status', 'what_changed', 'commitments', 'needs_you', 'unacknowledged_requests', 'open_questions', 'cross_source_flags'],
   additionalProperties: false,
 };
 
@@ -172,6 +192,7 @@ Read the project context (hard facts from the tracker) and WhatsApp chat signals
 2. EVERY soft-signal claim (client_pulse summary, what_changed items, commitment owner, etc.) must end with [Display Label, DD MMM] attribution showing who said it and when.
 3. If evidence is thin (e.g. only 2 messages), reflect low confidence. Do not pad sections.
 4. COMMITMENTS: extract only explicit promises ("I'll send X by Friday", "We'll confirm by Monday"). Not vague intentions.
+4b. UNACKNOWLEDGED REQUESTS — most critical category. List every client message in the chat window that contains a request, a question, or a decision the team has to make, where there is no team reply within 24 hours of the client message. For each entry: "request" = a one-line paraphrase of what the client asked for, "asked_by" = client display label, "asked_on" = DD MMM, "days_unanswered" = whole days from the client message to TODAY. If everything has been answered, return an empty array. Do NOT skip entries because they seem minor — an unanswered client is the highest-priority signal. A "request" is also when the client provides a piece of information that needs an acknowledgement, not just an explicit question.
 5. OPEN QUESTIONS: compose a SINGLE WhatsApp message for Amaan to send to the PID group. Start with "Hey @[planner first name]," then a short opener (vary — Amaan sends these every 1-2 days, never repeat the same opener). Then a numbered list — each point tied to specific chat evidence. Rules: (a) Every point must be a DIRECTIVE to the recipient, never a question back at Amaan ("should we do X?" is forbidden — replace with "please do X" or "what is the status of X?"). (b) Write as if the planner may not be around tomorrow — leave zero ambiguity, enough detail for anyone to pick this up and act. (c) If a cx message was ignored, state it plainly and ask for the response/resolution — do not soften. (d) If collection is low and no payment has moved, include the exact collected amount (from TRACKER) and ask when the next instalment is expected. (e) No emojis, no warm padding. If there is nothing to clarify, set clarification_message to an empty string.
 6. CROSS-SOURCE FLAGS: only raise a flag when chat clearly contradicts a tracker field you've been given. Do not flag speculative differences.
 7. NEEDS YOU: surface only things that genuinely require Amaan's decision or action. Not routine updates.
@@ -547,6 +568,16 @@ function renderMarkdown(
             `- [${c.status.toUpperCase()}] ${c.what} · **${c.owner}**${c.due ? ` · by ${c.due}` : ''}`,
         )
       : ['- None tracked']),
+    ``,
+    `---`,
+    ``,
+    `## Unacknowledged Client Requests`,
+    ...((brief.unacknowledged_requests?.length ?? 0) > 0
+      ? brief.unacknowledged_requests.map(
+          (r) =>
+            `- [UNANSWERED ${r.days_unanswered}d] "${r.request}" — ${r.asked_by}, ${r.asked_on}`,
+        )
+      : ['- None — every client request has been acknowledged']),
     ``,
     `---`,
     ``,

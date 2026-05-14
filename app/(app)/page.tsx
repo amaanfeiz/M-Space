@@ -88,30 +88,43 @@ export default async function DashboardPage() {
   const livePids = projects.filter((p) => p.status === 'Booked').length
   const totalBgmv = formatInr(projects.reduce((s, p) => s + (p.bgmv ?? 0), 0))
 
-  // Brief-derived urgency counts replace the old overall_pid_risk counts
+  // Brief-derived counts replace the old overall_pid_risk counts.
+  // "Urgent flags" = urgent needs_you + every unacknowledged_request.
   let urgentFlagCount = 0
   let openCommitmentCount = 0
   for (const brief of briefByPid.values()) {
     for (const n of brief.needs_you ?? []) {
       if (n.priority === 'urgent') urgentFlagCount++
     }
+    urgentFlagCount += brief.unacknowledged_requests?.length ?? 0
     for (const c of brief.commitments ?? []) {
       if (c.status === 'open' || c.status === 'overdue') openCommitmentCount++
     }
   }
 
-  // ── Top of Mind: urgent needs_you items across all latest briefs, ranked
-  // by client_pulse sentiment then capped at 5.
+  // ── Top of Mind: urgent needs_you items + unacknowledged client requests
+  // across all latest briefs. Unacknowledged requests are surfaced as virtual
+  // urgent items (a client waiting on a reply is the highest-leverage signal).
+  // Ranked by client_pulse sentiment, capped at 5.
   const urgentItems: UrgentItem[] = []
   for (const [pid, brief] of briefByPid) {
     const project = projects.find((p) => p.pid === pid)
+    const sentiment = brief.client_pulse?.sentiment ?? 'neutral'
+    for (const r of brief.unacknowledged_requests ?? []) {
+      urgentItems.push({
+        pid,
+        cxName: project?.cx_name ?? null,
+        action: `Unanswered ${r.days_unanswered}d: "${r.request}"`,
+        sentiment,
+      })
+    }
     for (const n of brief.needs_you ?? []) {
       if (n.priority !== 'urgent') continue
       urgentItems.push({
         pid,
         cxName: project?.cx_name ?? null,
         action: n.action,
-        sentiment: brief.client_pulse?.sentiment ?? 'neutral',
+        sentiment,
       })
     }
   }
