@@ -11,6 +11,7 @@ type Row = {
   designer: string | null
   project_manager: string | null
   event_start_date: string | null
+  t_days: number | null
   overall_pid_risk: string | null
   collection_pct: number | null
   bgmv: number | null
@@ -156,7 +157,80 @@ function PulseCell({ brief }: { brief: BriefSummary | undefined }) {
   )
 }
 
+// Past events = event > 7 days behind today. Sales WIP = no planner assigned.
+function segment(rows: Row[]) {
+  const active: Row[] = []
+  const past: Row[] = []
+  const wip: Row[] = []
+  for (const r of rows) {
+    if (!r.planner) wip.push(r)
+    else if ((r.t_days ?? 0) < -7) past.push(r)
+    else active.push(r)
+  }
+  // Most-recent-past first inside the past segment so the freshest closures sit at the top.
+  past.sort((a, b) =>
+    new Date(b.event_start_date ?? 0).getTime() - new Date(a.event_start_date ?? 0).getTime(),
+  )
+  return { active, past, wip }
+}
+
+function ProjectRow({ p, brief, muted }: { p: Row; brief: BriefSummary | undefined; muted?: boolean }) {
+  const level = normaliseRisk(p.overall_pid_risk)
+  const accentColor = brief?.sentiment
+    ? (SENTIMENT_COLOR[brief.sentiment] ?? riskAccent(level))
+    : riskAccent(level)
+  const dim = muted ? 0.65 : 1
+  return (
+    <tr
+      key={p.pid}
+      onClick={() => { window.location.hash = `#pid=${p.pid}` }}
+      style={{ opacity: dim }}
+    >
+      <td style={{ padding: 0, width: 4, boxShadow: `inset 3px 0 0 ${accentColor}` }} />
+      <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', fontVariantNumeric: 'tabular-nums', paddingLeft: 14 }}>
+        {p.pid}
+      </td>
+      <td style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: 13, maxWidth: 160, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        {formatCouple(p.cx_name)}
+      </td>
+      <td><PulseCell brief={brief} /></td>
+      <td style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+        {locationCode(p.state, p.city)}
+      </td>
+      <td><MemberCell name={p.planner} /></td>
+      <td><MemberCell name={p.designer} /></td>
+      <td><MemberCell name={p.project_manager} /></td>
+      <td>{eventCell(p.event_start_date)}</td>
+      <td><CollectCell pct={p.collection_pct} /></td>
+      <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'var(--text-muted)', paddingRight: 20 }}>
+        {formatInr(p.bgmv)}
+      </td>
+    </tr>
+  )
+}
+
+function DividerRow({ label }: { label: string }) {
+  return (
+    <tr style={{ background: 'transparent' }}>
+      <td colSpan={11} style={{
+        padding: '14px 14px 6px',
+        fontSize: 10,
+        fontWeight: 700,
+        letterSpacing: '0.12em',
+        textTransform: 'uppercase',
+        color: 'var(--text-dim)',
+        borderTop: '1px solid var(--border-subtle)',
+        background: 'transparent',
+        cursor: 'default',
+      }}>
+        {label}
+      </td>
+    </tr>
+  )
+}
+
 export function ProjectsTable({ projects, briefMap }: { projects: Row[]; briefMap: Map<number, BriefSummary> }) {
+  const { active, past, wip } = segment(projects)
   return (
     <div className="projects-table-wrap">
       <table className="projects-table">
@@ -176,37 +250,17 @@ export function ProjectsTable({ projects, briefMap }: { projects: Row[]; briefMa
           </tr>
         </thead>
         <tbody>
-          {projects.map((p) => {
-            const brief = briefMap.get(p.pid)
-            const level = normaliseRisk(p.overall_pid_risk)
-            // Sentiment takes priority over tracker risk for the accent bar
-            const accentColor = brief?.sentiment
-              ? (SENTIMENT_COLOR[brief.sentiment] ?? riskAccent(level))
-              : riskAccent(level)
-            return (
-              <tr key={p.pid} onClick={() => { window.location.hash = `#pid=${p.pid}` }}>
-                <td style={{ padding: 0, width: 4, boxShadow: `inset 3px 0 0 ${accentColor}` }} />
-                <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', fontVariantNumeric: 'tabular-nums', paddingLeft: 14 }}>
-                  {p.pid}
-                </td>
-                <td style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: 13, maxWidth: 160, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {formatCouple(p.cx_name)}
-                </td>
-                <td><PulseCell brief={brief} /></td>
-                <td style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
-                  {locationCode(p.state, p.city)}
-                </td>
-                <td><MemberCell name={p.planner} /></td>
-                <td><MemberCell name={p.designer} /></td>
-                <td><MemberCell name={p.project_manager} /></td>
-                <td>{eventCell(p.event_start_date)}</td>
-                <td><CollectCell pct={p.collection_pct} /></td>
-                <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'var(--text-muted)', paddingRight: 20 }}>
-                  {formatInr(p.bgmv)}
-                </td>
-              </tr>
-            )
-          })}
+          {active.map((p) => (
+            <ProjectRow key={p.pid} p={p} brief={briefMap.get(p.pid)} />
+          ))}
+          {past.length > 0 && <DividerRow label={`Past events · ${past.length}`} />}
+          {past.map((p) => (
+            <ProjectRow key={p.pid} p={p} brief={briefMap.get(p.pid)} muted />
+          ))}
+          {wip.length > 0 && <DividerRow label={`Sales WIP · planning not started · ${wip.length}`} />}
+          {wip.map((p) => (
+            <ProjectRow key={p.pid} p={p} brief={briefMap.get(p.pid)} muted />
+          ))}
         </tbody>
       </table>
     </div>

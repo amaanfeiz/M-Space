@@ -9,7 +9,6 @@ import {
   type LucideIcon,
   MessageSquare,
   Settings as SettingsIcon,
-  Sparkles,
   Users,
 } from 'lucide-react'
 
@@ -24,7 +23,6 @@ const NAV: NavItem[] = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/projects', label: 'Projects', icon: Layers },
   { href: '/team', label: 'Team', icon: Users },
-  { href: '/intelligence', label: 'Intelligence', icon: Sparkles },
   { href: '/coplanner', label: 'Coplanner', icon: MessageSquare, beta: true },
   { href: '/reports', label: 'Reports', icon: FileText },
 ]

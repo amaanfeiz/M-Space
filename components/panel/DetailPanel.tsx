@@ -6,7 +6,8 @@ import { createClient } from '@/lib/supabase/client'
 import { PID_DATA } from '@/lib/static/pid_data_static'
 import { formatInr } from '@/lib/types/project'
 import type { StaticPID } from '@/lib/static/pid_data_static'
-import { BriefBody, type BriefJSON } from '@/components/intelligence/BriefCard'
+import { BriefBody, type BriefJSON } from '@/components/intelligence/BriefBody'
+import { BriefFeedback } from '@/components/intelligence/BriefFeedback'
 
 type DBProject = {
   pid: number
@@ -33,6 +34,7 @@ type DBProject = {
 }
 
 type BriefMeta = {
+  id: string
   json: BriefJSON
   date: string
   isCatchup: boolean
@@ -319,14 +321,19 @@ export function DetailPanel() {
     const supabase = createClient()
     supabase
       .from('briefs')
-      .select('brief_json, brief_date, is_catchup')
+      .select('id, brief_json, brief_date, is_catchup')
       .eq('pid', parseInt(openPid))
       .order('brief_date', { ascending: false })
       .limit(1)
       .single()
       .then(({ data }) => {
         if (data) {
-          setBrief({ json: data.brief_json as BriefJSON, date: data.brief_date, isCatchup: data.is_catchup })
+          setBrief({
+            id: data.id as string,
+            json: data.brief_json as BriefJSON,
+            date: data.brief_date,
+            isCatchup: data.is_catchup,
+          })
         } else {
           setBrief(null)
         }
@@ -468,7 +475,10 @@ export function DetailPanel() {
                     <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>Loading brief…</div>
                   )}
                   {!briefLoading && brief && (
-                    <BriefBody brief={brief.json} briefDate={brief.date} isCatchup={brief.isCatchup} />
+                    <>
+                      <BriefBody brief={brief.json} briefDate={brief.date} isCatchup={brief.isCatchup} />
+                      <BriefFeedback briefId={brief.id} pid={parseInt(openPid)} />
+                    </>
                   )}
                   {!briefLoading && !brief && (
                     <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>
