@@ -6,6 +6,7 @@ interface BriefSummary {
   sentiment: string
   flags: number
   actions: number
+  briefDate: string
 }
 
 const SENTIMENT_LABEL: Array<keyof typeof SENTIMENT_COLOR> = [
@@ -53,6 +54,7 @@ export default async function ProjectsPage() {
       sentiment: j?.client_pulse?.sentiment ?? '',
       flags: j?.cross_source_flags?.length ?? 0,
       actions: (j?.needs_you?.length ?? 0) + (j?.unacknowledged_requests?.length ?? 0),
+      briefDate: b.brief_date,
     })
   }
 
