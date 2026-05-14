@@ -215,6 +215,9 @@ For "days_silent": count from the most recent client message to today. 0 = messa
 For "last_active_date" in team_status: use "DD MMM" format or "" if never seen in this window.
 For "due" in commitments: use "DD MMM" or "" if no date was given.
 
+## Team status silence rule
+If a team member's last_active_date is more than 7 days before TODAY, the "activity_note" MUST start with "Silent {N}d — " where {N} is whole days from last activity to TODAY. This prevents a reader from misreading "last active 1 May" as "currently engaged" when the project hasn't moved in two weeks. Example: "Silent 11d — last visible activity was sharing the venue brochure on 3 May."
+
 ## Clarification message tone (for open_questions)
 Direct and accountable, like a TL checking in with their team. Not stiff or corporate. No em dashes anywhere. Use commas or full stops instead.
 
@@ -295,6 +298,21 @@ async function loadProject(pid: number): Promise<ProjectRow | null> {
   return data;
 }
 
+interface FeedbackRow {
+  user_input: string;
+  created_at: string;
+}
+
+async function loadRecentFeedback(pid: number): Promise<FeedbackRow[]> {
+  const { data } = await supabase
+    .from('brief_feedback')
+    .select('user_input, created_at')
+    .eq('pid', pid)
+    .order('created_at', { ascending: false })
+    .limit(3);
+  return (data ?? []) as FeedbackRow[];
+}
+
 async function loadSenders(pid: number): Promise<Map<string, { display_label: string; role: string }>> {
   const { data } = await supabase
     .from('signal_senders')
@@ -348,6 +366,7 @@ function buildUserPrompt(
   project: ProjectRow,
   senders: Map<string, { display_label: string; role: string }>,
   signals: SignalRow[],
+  feedback: FeedbackRow[],
   catchup: boolean,
   briefDate: string,
 ): string {
@@ -418,6 +437,14 @@ TRACKER: Risk summary: ${project.overall_risk_summary ?? '—'}
 
 === KNOWN SENDERS (from resolved roster) ===
 ${[...senders.values()].map((s) => `${s.display_label} (${s.role})`).join(', ') || 'none resolved'}
+
+=== PRIOR USER FEEDBACK ON BRIEFS FOR THIS PID ===
+${feedback.length === 0
+  ? 'No feedback recorded yet.'
+  : feedback
+      .map((f) => `[${f.created_at.slice(0, 10)}] ${f.user_input.trim()}`)
+      .join('\n')}
+Treat the feedback above as authoritative corrections. If the user said "don't do X", never do X in this brief.
 
 === CHAT SIGNALS ===
 Mode: ${mode}
@@ -641,16 +668,17 @@ async function main() {
   for (const pid of targetPids) {
     process.stdout.write(`PID ${pid}... `);
 
-    const [project, senders, signals] = await Promise.all([
+    const [project, senders, signals, feedback] = await Promise.all([
       loadProject(pid),
       loadSenders(pid),
       loadSignals(pid, isCatchup),
+      loadRecentFeedback(pid),
     ]);
 
     if (!project) { console.log('SKIP (project not found)'); failed++; continue; }
     if (signals.length === 0) { console.log('SKIP (no signals in window)'); failed++; continue; }
 
-    const userPrompt = buildUserPrompt(project, senders, signals, isCatchup, briefDate);
+    const userPrompt = buildUserPrompt(project, senders, signals, feedback, isCatchup, briefDate);
     const result = await callHaiku(userPrompt);
 
     if (!result) { console.log('FAILED (Haiku error)'); failed++; continue; }
