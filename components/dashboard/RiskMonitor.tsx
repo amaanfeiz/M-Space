@@ -54,11 +54,8 @@ export function RiskMonitor({ projects }: RiskMonitorProps) {
   return (
     <div className="card card--flat">
       <div className="section-header">
-        <div className="eyebrow">Risk Monitor</div>
-        <span className="live-pill">
-          <span className="pulse-dot" />
-          health
-        </span>
+        <div className="eyebrow">Tracker risks</div>
+        <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>health profile</span>
       </div>
       {projects.map((p, i) => {
         const pct = Math.round(((p.project_health ?? 3) / 5) * 100)

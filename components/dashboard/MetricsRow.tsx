@@ -3,15 +3,17 @@ import { AnimatedCounter } from './AnimatedCounter'
 type MetricsRowProps = {
   livePids: number
   totalBgmv: string
-  criticalCount: number
-  attentionCount: number
+  /** Count of urgent needs_you items across all latest briefs. */
+  urgentFlagCount: number
+  /** Count of commitments in open or overdue status across all latest briefs. */
+  openCommitmentCount: number
 }
 
 export function MetricsRow({
   livePids,
   totalBgmv,
-  criticalCount,
-  attentionCount,
+  urgentFlagCount,
+  openCommitmentCount,
 }: MetricsRowProps) {
   return (
     <div className="metrics-bento">
@@ -29,25 +31,25 @@ export function MetricsRow({
         <div className="metric-change change-neutral">Across your portfolio</div>
       </div>
 
-      <div className={`card metric-card stagger-3${criticalCount > 0 ? ' metric-card--critical' : ''}`}>
-        <div className="metric-label">Critical</div>
+      <div className={`card metric-card stagger-3${urgentFlagCount > 0 ? ' metric-card--critical' : ''}`}>
+        <div className="metric-label">Urgent flags</div>
         <div className="metric-number">
           <span className="status-dot dot-critical" style={{ marginRight: 8 }} />
-          <AnimatedCounter value={criticalCount} />
+          <AnimatedCounter value={urgentFlagCount} />
         </div>
-        <div className={`metric-change ${criticalCount > 0 ? 'change-bad' : 'change-neutral'}`}>
-          {criticalCount > 0 ? 'Needs immediate attention' : 'No critical risks'}
+        <div className={`metric-change ${urgentFlagCount > 0 ? 'change-bad' : 'change-neutral'}`}>
+          {urgentFlagCount > 0 ? 'Needs immediate action' : 'No urgent flags'}
         </div>
       </div>
 
-      <div className={`card metric-card stagger-4${attentionCount > 0 ? ' metric-card--attention' : ''}`}>
-        <div className="metric-label">Attention</div>
+      <div className={`card metric-card stagger-4${openCommitmentCount > 0 ? ' metric-card--attention' : ''}`}>
+        <div className="metric-label">Open commitments</div>
         <div className="metric-number">
           <span className="status-dot dot-attention" style={{ marginRight: 8 }} />
-          <AnimatedCounter value={attentionCount} />
+          <AnimatedCounter value={openCommitmentCount} />
         </div>
-        <div className={`metric-change ${attentionCount > 0 ? 'change-bad' : 'change-neutral'}`}>
-          {attentionCount > 0 ? `${attentionCount} items to watch` : 'No attention items'}
+        <div className={`metric-change ${openCommitmentCount > 0 ? 'change-bad' : 'change-neutral'}`}>
+          {openCommitmentCount > 0 ? `${openCommitmentCount} pending follow-ups` : 'All commitments closed'}
         </div>
       </div>
     </div>

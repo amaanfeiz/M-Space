@@ -1,31 +1,19 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-
-function makeBriefingEyebrow(): string {
-  const nowIst = new Date(Date.now() + 5.5 * 60 * 60 * 1000)
-  return `Executive Briefing · ${nowIst.toLocaleTimeString('en-IN', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: true,
-    timeZone: 'Asia/Kolkata',
-  })} · ${nowIst.toLocaleDateString('en-IN', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    timeZone: 'Asia/Kolkata',
-  })}`
-}
 import type { Project } from '@/lib/types/project'
-import { RISK_ORDER, formatInr } from '@/lib/types/project'
+import { formatInr } from '@/lib/types/project'
+import type { BriefJSON } from '@/components/intelligence/BriefCard'
 import { WelcomeBanner } from '@/components/dashboard/WelcomeBanner'
-import { WhatChanged } from '@/components/dashboard/WhatChanged'
 import { StalledProjects } from '@/components/dashboard/StalledProjects'
-import { ExecutiveBriefing } from '@/components/dashboard/ExecutiveBriefing'
 import { MetricsRow } from '@/components/dashboard/MetricsRow'
-import { TodaysPriorities } from '@/components/dashboard/TodaysPriorities'
 import { RiskMonitor } from '@/components/dashboard/RiskMonitor'
 import { TeamPerformance, groupByPlanner } from '@/components/dashboard/TeamPerformance'
 import { ActivityFeed } from '@/components/dashboard/ActivityFeed'
+import { TopOfMind, type UrgentItem } from '@/components/dashboard/TopOfMind'
+
+const URGENCY_RANK: Record<string, number> = {
+  cold: 0, anxious: 1, cautious: 2, neutral: 3, positive: 4,
+}
 
 export default async function DashboardPage() {
   const supabase = await createClient()
@@ -35,29 +23,67 @@ export default async function DashboardPage() {
   } = await supabase.auth.getUser()
   if (!user?.email) redirect('/login')
 
-  const { data, error } = await supabase.from('projects').select(
-    'pid, cx_name, status, communication_days, overall_pid_risk, cancellation_risk, current_summary, bgmv, collection_pct, event_start_date, planner, project_health, venue, state, last_message_date, synced_at',
-  )
+  const [
+    { data: projectData, error },
+    { data: briefRows },
+  ] = await Promise.all([
+    supabase.from('projects').select(
+      'pid, cx_name, status, communication_days, overall_pid_risk, cancellation_risk, current_summary, bgmv, collection_pct, event_start_date, planner, project_health, venue, state, last_message_date, synced_at',
+    ),
+    supabase
+      .from('briefs')
+      .select('pid, brief_date, brief_json')
+      .order('brief_date', { ascending: false })
+      .limit(200),
+  ])
 
-  const projects: Project[] = data ?? []
+  const projects: Project[] = projectData ?? []
 
   if (error) {
     console.error('[dashboard] fetch error', error.message)
   }
 
+  // Latest brief per PID
+  const briefByPid = new Map<number, BriefJSON>()
+  for (const b of briefRows ?? []) {
+    if (briefByPid.has(b.pid)) continue
+    briefByPid.set(b.pid, b.brief_json as BriefJSON)
+  }
+
   // ── Metrics
   const livePids = projects.filter((p) => p.status === 'Booked').length
   const totalBgmv = formatInr(projects.reduce((s, p) => s + (p.bgmv ?? 0), 0))
-  const criticalCount = projects.filter((p) => p.overall_pid_risk === 'Critical').length
-  const attentionCount = projects.filter((p) => p.overall_pid_risk === 'Attention').length
 
-  // ── By risk severity then cancellation_risk desc
-  const byRisk = [...projects].sort((a, b) => {
-    const ra = RISK_ORDER[a.overall_pid_risk ?? ''] ?? 99
-    const rb = RISK_ORDER[b.overall_pid_risk ?? ''] ?? 99
-    if (ra !== rb) return ra - rb
-    return (b.cancellation_risk ?? 0) - (a.cancellation_risk ?? 0)
-  })
+  // Brief-derived urgency counts replace the old overall_pid_risk counts
+  let urgentFlagCount = 0
+  let openCommitmentCount = 0
+  for (const brief of briefByPid.values()) {
+    for (const n of brief.needs_you ?? []) {
+      if (n.priority === 'urgent') urgentFlagCount++
+    }
+    for (const c of brief.commitments ?? []) {
+      if (c.status === 'open' || c.status === 'overdue') openCommitmentCount++
+    }
+  }
+
+  // ── Top of Mind: urgent needs_you items across all latest briefs, ranked
+  // by client_pulse sentiment then capped at 5.
+  const urgentItems: UrgentItem[] = []
+  for (const [pid, brief] of briefByPid) {
+    const project = projects.find((p) => p.pid === pid)
+    for (const n of brief.needs_you ?? []) {
+      if (n.priority !== 'urgent') continue
+      urgentItems.push({
+        pid,
+        cxName: project?.cx_name ?? null,
+        action: n.action,
+        sentiment: brief.client_pulse?.sentiment ?? 'neutral',
+      })
+    }
+  }
+  const topItems = urgentItems
+    .sort((a, b) => (URGENCY_RANK[a.sentiment] ?? 3) - (URGENCY_RANK[b.sentiment] ?? 3))
+    .slice(0, 5)
 
   // ── Stalled: communication_days > 14, not cancelled/concluded, top 3
   const stalled = projects
@@ -70,23 +96,11 @@ export default async function DashboardPage() {
     .sort((a, b) => (b.communication_days ?? 0) - (a.communication_days ?? 0))
     .slice(0, 3)
 
-  // ── Today's Priorities: top 5
-  const priorities = byRisk.slice(0, 5)
-
-  // ── Risk Monitor: top 5 by cancellation_risk
+  // ── Tracker risks: top 5 by cancellation_risk (numeric, tracker-derived;
+  // kept as a sanity-check signal against Pulse).
   const riskRows = [...projects]
     .sort((a, b) => (b.cancellation_risk ?? 0) - (a.cancellation_risk ?? 0))
     .slice(0, 5)
-
-  // ── What Changed: top 7 by last_message_date desc
-  const recentlyActive = [...projects]
-    .filter((p) => p.current_summary)
-    .sort(
-      (a, b) =>
-        new Date(b.last_message_date ?? b.synced_at ?? 0).getTime() -
-        new Date(a.last_message_date ?? a.synced_at ?? 0).getTime(),
-    )
-    .slice(0, 7)
 
   // ── Activity Feed: top 8 by last_message_date desc
   const activityProjects = [...projects]
@@ -107,39 +121,37 @@ export default async function DashboardPage() {
   const userName = nameParts.map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join(' ')
   const userInitials = nameParts.slice(0, 2).map((p) => p.charAt(0).toUpperCase()).join('') || 'U'
 
-  // ── Sync time from most recent project
-  const syncedAt = projects[0]?.synced_at ?? null
-
-  // ── Briefing eyebrow
-  const briefingEyebrow = makeBriefingEyebrow()
+  // Welcome banner top projects use brief sentiment urgency when a brief
+  // exists, falling back to overall_pid_risk for those without.
+  const welcomeTop = [...projects]
+    .sort((a, b) => {
+      const sa = briefByPid.get(a.pid)?.client_pulse?.sentiment
+      const sb = briefByPid.get(b.pid)?.client_pulse?.sentiment
+      const ra = sa ? URGENCY_RANK[sa] ?? 3 : 3
+      const rb = sb ? URGENCY_RANK[sb] ?? 3 : 3
+      return ra - rb
+    })
+    .slice(0, 3)
 
   return (
     <>
       <WelcomeBanner
         userName={userName}
         userInitials={userInitials}
-        topProjects={byRisk.slice(0, 3)}
+        topProjects={welcomeTop}
       />
-      <ExecutiveBriefing
-        projects={projects}
-        criticalCount={criticalCount}
-        attentionCount={attentionCount}
-        totalBgmv={totalBgmv}
-        eyebrow={briefingEyebrow}
-      />
+      <TopOfMind items={topItems} />
       <MetricsRow
         livePids={livePids}
         totalBgmv={totalBgmv}
-        criticalCount={criticalCount}
-        attentionCount={attentionCount}
+        urgentFlagCount={urgentFlagCount}
+        openCommitmentCount={openCommitmentCount}
       />
       {stalled.length > 0 && <StalledProjects projects={stalled} />}
       <div className="panels-row">
-        <TodaysPriorities projects={priorities} />
+        <TeamPerformance planners={planners} />
         <RiskMonitor projects={riskRows} />
       </div>
-      <WhatChanged projects={recentlyActive} syncedAt={syncedAt} />
-      <TeamPerformance planners={planners} />
       <ActivityFeed projects={activityProjects} />
     </>
   )
