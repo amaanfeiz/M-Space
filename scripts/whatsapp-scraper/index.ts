@@ -12,13 +12,30 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
 );
 
-// Client groups contain "PID : <number>" or "PID: <number>" anywhere in the title
-const CLIENT_PATTERN = /\bPID\s*:\s*(\d{4,6})\b/i;
-// Internal groups start with "<region> - <pid> - ..." (HP/RJ/Jaipur/Udaipur/Kerala/etc.)
-const INTERNAL_PATTERN = /^[A-Za-z][A-Za-z\s]*\s*-\s*(\d{4,6})\b/;
+// Client groups contain "PID : <number>", "PID: <number>", or "PID <number>" anywhere in the title
+const CLIENT_PATTERN = /\bPID\s*:?\s*(\d{4,6})\b/i;
+// Internal groups start with a region/location prefix then a PID number.
+// Handles: "HP - 24292", "UK - Rishikesh - 23671" (multi-part), "Udaipur _ 29568" (underscore),
+// "RAJ/ Goa - 33797" (slash), "UK PID 31574" (PID keyword without colon),
+// "RJ_PID-32245_..." (old underscore format — \b fails here since _ is \w, use (?!\d) instead).
+const INTERNAL_PATTERN = /^[A-Za-z][A-Za-z\s/\-_]*?(\d{4,6})(?!\d)/;
 
-const DEMO_PIDS = ['24292', '28172', '33798'];
-const MESSAGE_LIMIT = 200;
+// All 31 active PIDs where Amaan is TL/planner/designer/PM (as of 2026-05-11)
+const ALL_AMAAN_PIDS = [
+  // 20 with existing export data
+  '24292', '28172', '33798', '19935', '20614', '24202', '24401',
+  '25210', '26903', '30646', '30969', '32125', '29662', '32245',
+  '33487', '31341', '23671', '28438', '28166', '29568',
+  // 11 with no data yet
+  '28698', '21491', '33797', '28625', '30731', '33673',
+  '33565', '31574', '33313', '33867', '34002',
+];
+
+// CLI: pass specific PIDs as args (e.g. npx tsx index.ts 28698 21491), or run all if none given
+const cliPids = process.argv.slice(2).filter((a) => /^\d+$/.test(a));
+const TARGET_PIDS = cliPids.length > 0 ? cliPids : ALL_AMAAN_PIDS;
+
+const MESSAGE_LIMIT = parseInt(process.env.MESSAGE_LIMIT ?? '2000', 10);
 
 const CHROME_PATH =
   process.env.CHROME_PATH ?? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
@@ -118,29 +135,40 @@ wa.on('ready', async () => {
   console.log(`Total groups:       ${groupChats.length}`);
   console.log(`Client PID groups:  ${clientGroups.length}`);
   console.log(`Internal groups:    ${internalGroups.length}`);
+  console.log(`Target PIDs (${TARGET_PIDS.length}): ${TARGET_PIDS.join(', ')}`);
 
-  console.log('\nDemo PID coverage:');
-  for (const pid of DEMO_PIDS) {
+  console.log('\nCoverage check:');
+  const neitherFound: string[] = [];
+  for (const pid of TARGET_PIDS) {
     const cg = clientGroups.find((g) => g.pid === pid);
     const ig = internalGroups.find((g) => g.pid === pid);
-    console.log(
-      `  PID ${pid}: client=${cg ? 'YES' : 'NO '}  internal=${ig ? 'YES' : 'NO '}`,
-    );
-    if (cg) console.log(`    -> ${cg.name}`);
-    if (ig) console.log(`    -> ${ig.name}`);
+    if (!cg && !ig) {
+      neitherFound.push(pid);
+      console.log(`  PID ${pid}: NO GROUPS FOUND`);
+    } else {
+      console.log(`  PID ${pid}: client=${cg ? 'YES' : 'NO '}  internal=${ig ? 'YES' : 'NO '}`);
+      if (cg) console.log(`    -> ${cg.name}`);
+      if (ig) console.log(`    -> ${ig.name}`);
+    }
   }
 
-  console.log('\n--- Scraping messages for demo PIDs ---');
-  for (const pid of DEMO_PIDS) {
+  if (neitherFound.length > 0) {
+    console.log(`\nCouldn't find any group for ${neitherFound.length} PID(s): ${neitherFound.join(', ')}`);
+  }
+
+  console.log('\n--- Scraping messages ---');
+  for (const pid of TARGET_PIDS) {
+    if (neitherFound.includes(pid)) continue;
+
     console.log(`\nPID ${pid}:`);
     const cg = clientGroups.find((g) => g.pid === pid);
     const ig = internalGroups.find((g) => g.pid === pid);
 
     if (cg) await scrapeAndStore(pid, 'client', cg.name, cg.chat);
-    else console.log(`  No client group found — skipping.`);
+    else console.log(`  No client group found.`);
 
     if (ig) await scrapeAndStore(pid, 'internal', ig.name, ig.chat);
-    else console.log(`  No internal group found — skipping.`);
+    else console.log(`  No internal group found.`);
   }
 
   console.log('\nDone. Exiting.');
