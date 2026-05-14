@@ -14,7 +14,7 @@ export default async function ProjectsPage() {
   const [{ data }, { data: briefRows }] = await Promise.all([
     supabase
       .from('projects')
-      .select('pid, cx_name, status, planner, designer, project_manager, event_start_date, overall_pid_risk, bgmv, collection_pct, cancellation_risk, region, state, city')
+      .select('pid, cx_name, status, planner, designer, project_manager, event_start_date, overall_pid_risk, bgmv, collection_pct, region, state, city')
       .order('event_start_date', { ascending: true }),
     supabase
       .from('briefs')

@@ -12,7 +12,6 @@ type Row = {
   project_manager: string | null
   event_start_date: string | null
   overall_pid_risk: string | null
-  cancellation_risk: number | null
   collection_pct: number | null
   bgmv: number | null
   region: string | null
@@ -47,13 +46,13 @@ function initials(name: string | null): string {
   return name.split(' ').slice(0, 2).map((p) => p[0]?.toUpperCase() ?? '').join('')
 }
 
-// Normalise whatever the DB sends into Critical/Attention/Healthy/null
+// Normalise whatever the DB sends into Critical/Attention/Healthy/null.
+// Used only as a fallback for the row accent when no brief sentiment exists.
 function normaliseRisk(raw: string | null): 'Critical' | 'Attention' | 'Healthy' | null {
   if (!raw) return null
   const l = raw.toLowerCase()
   if (l === 'critical' || l.includes('critical')) return 'Critical'
   if (l === 'healthy' || l === 'low' || l === 'none' || l === 'green') return 'Healthy'
-  // "Attention", "Risk", "Communication Risk", "Collection Risk", etc.
   return 'Attention'
 }
 
@@ -64,36 +63,13 @@ function riskAccent(level: ReturnType<typeof normaliseRisk>): string {
   return 'var(--border-subtle)'
 }
 
-function RiskHealthCell({ risk, cancelRisk }: { risk: string | null; cancelRisk: number | null }) {
-  const level = normaliseRisk(risk)
-  const val = cancelRisk ?? 0
-  const color = level === 'Critical' ? 'var(--critical)' : level === 'Attention' ? 'var(--attention)' : level === 'Healthy' ? 'var(--healthy)' : 'var(--text-dim)'
-  const label = level ?? (risk ?? '—')
-
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-      <div className="health-dots" aria-label={label} title={label}>
-        {[1, 2, 3, 4, 5].map((i) => (
-          <div key={i} className="health-dot" style={{
-            background: i <= val ? color : 'var(--border-default)',
-            opacity: i <= val ? 1 : 0.28,
-          }} />
-        ))}
-      </div>
-    </div>
-  )
-}
-
 function CollectCell({ pct }: { pct: number | null }) {
   if (pct == null) return <span style={{ color: 'var(--text-dim)' }}>—</span>
   const color = pct >= 60 ? 'var(--healthy)' : pct >= 30 ? 'var(--attention)' : 'var(--critical)'
   return (
-    <div className="collect-bar-wrap">
-      <span className="collect-pct" style={{ color }}>{pct.toFixed(0)}%</span>
-      <div className="collect-bar">
-        <div className="collect-bar-fill" style={{ width: `${Math.min(pct, 100)}%`, background: color }} />
-      </div>
-    </div>
+    <span style={{ color, fontFamily: 'var(--font-mono)', fontSize: 12, fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>
+      {pct.toFixed(0)}%
+    </span>
   )
 }
 
@@ -195,7 +171,6 @@ export function ProjectsTable({ projects, briefMap }: { projects: Row[]; briefMa
             <th>Designer</th>
             <th>PM</th>
             <th>Event</th>
-            <th>Risk · Cancel</th>
             <th>Collected</th>
             <th style={{ textAlign: 'right' }}>BGMV</th>
           </tr>
@@ -225,7 +200,6 @@ export function ProjectsTable({ projects, briefMap }: { projects: Row[]; briefMa
                 <td><MemberCell name={p.designer} /></td>
                 <td><MemberCell name={p.project_manager} /></td>
                 <td>{eventCell(p.event_start_date)}</td>
-                <td><RiskHealthCell risk={p.overall_pid_risk} cancelRisk={p.cancellation_risk} /></td>
                 <td><CollectCell pct={p.collection_pct} /></td>
                 <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'var(--text-muted)', paddingRight: 20 }}>
                   {formatInr(p.bgmv)}
