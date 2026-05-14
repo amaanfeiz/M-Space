@@ -20,6 +20,12 @@ type Row = {
   city: string | null
 }
 
+interface BriefSummary {
+  sentiment: string
+  flags: number
+  actions: number
+}
+
 // Build name → color map from static team config
 const MEMBER_COLORS: Record<string, string> = {}
 for (const t of TEAMS) {
@@ -129,12 +135,52 @@ function MemberCell({ name }: { name: string | null }) {
   )
 }
 
-function stripDestinationSuffix(loc: string | null | undefined): string {
-  if (!loc) return '—'
-  return loc.replace(/\s*\(D\)\s*$/i, '').trim() || '—'
+const SENTIMENT_COLOR: Record<string, string> = {
+  positive: 'var(--healthy)',
+  neutral:  'var(--text-dim)',
+  cautious: 'var(--attention)',
+  anxious:  'var(--critical)',
+  cold:     'var(--critical)',
 }
 
-export function ProjectsTable({ projects }: { projects: Row[] }) {
+const STATE_CODE: Record<string, string> = {
+  'Kerala': 'KL', 'Uttarakhand': 'UK', 'Rajasthan': 'RJ',
+  'Himachal Pradesh': 'HP', 'Goa': 'GA', 'Maharashtra': 'MH',
+  'Delhi': 'DL', 'Karnataka': 'KA', 'Tamil Nadu': 'TN',
+  'Andhra Pradesh': 'AP', 'Telangana': 'TS', 'Gujarat': 'GJ',
+  'Madhya Pradesh': 'MP', 'Uttar Pradesh': 'UP', 'Punjab': 'PB',
+}
+
+function locationCode(state: string | null, city: string | null): string {
+  const raw = state ?? city
+  if (!raw) return '—'
+  const stripped = raw.replace(/\s*\(D\)\s*$/i, '').trim()
+  return STATE_CODE[stripped] ?? stripped
+}
+
+function PulseCell({ brief }: { brief: BriefSummary | undefined }) {
+  if (!brief || !brief.sentiment) {
+    return <span style={{ color: 'var(--text-dim)', fontSize: 11 }}>—</span>
+  }
+  const color = SENTIMENT_COLOR[brief.sentiment] ?? 'var(--text-dim)'
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+      <span style={{ width: 7, height: 7, borderRadius: '50%', background: color, flexShrink: 0, display: 'inline-block' }} />
+      <span style={{ fontSize: 11, color, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+        {brief.sentiment.slice(0, 3)}
+      </span>
+      {(brief.flags > 0 || brief.actions > 0) && (
+        <span style={{ fontSize: 10, color: 'var(--text-dim)', marginLeft: 2 }}>
+          {brief.flags > 0 && <span style={{ color: 'var(--attention)' }}>{brief.flags}f</span>}
+          {brief.flags > 0 && brief.actions > 0 && ' '}
+          {brief.actions > 0 && <span style={{ color: 'var(--critical)' }}>{brief.actions}a</span>}
+        </span>
+      )}
+    </div>
+  )
+}
+
+export function ProjectsTable({ projects, briefMap }: { projects: Row[]; briefMap: Map<number, BriefSummary> }) {
   return (
     <div className="projects-table-wrap">
       <table className="projects-table">
@@ -143,29 +189,38 @@ export function ProjectsTable({ projects }: { projects: Row[] }) {
             <th style={{ width: 4, padding: 0 }} />
             <th>PID</th>
             <th>Couple</th>
-            <th>Location</th>
+            <th>Pulse</th>
+            <th>Loc</th>
             <th>Planner</th>
             <th>Designer</th>
             <th>PM</th>
             <th>Event</th>
-            <th>Risk · Health</th>
+            <th>Risk · Cancel</th>
             <th>Collected</th>
             <th style={{ textAlign: 'right' }}>BGMV</th>
           </tr>
         </thead>
         <tbody>
           {projects.map((p) => {
+            const brief = briefMap.get(p.pid)
             const level = normaliseRisk(p.overall_pid_risk)
+            // Sentiment takes priority over tracker risk for the accent bar
+            const accentColor = brief?.sentiment
+              ? (SENTIMENT_COLOR[brief.sentiment] ?? riskAccent(level))
+              : riskAccent(level)
             return (
               <tr key={p.pid} onClick={() => { window.location.hash = `#pid=${p.pid}` }}>
-                <td style={{ padding: 0, width: 4, boxShadow: `inset 3px 0 0 ${riskAccent(level)}` }} />
+                <td style={{ padding: 0, width: 4, boxShadow: `inset 3px 0 0 ${accentColor}` }} />
                 <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', fontVariantNumeric: 'tabular-nums', paddingLeft: 14 }}>
                   {p.pid}
                 </td>
                 <td style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: 13, maxWidth: 160, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {formatCouple(p.cx_name)}
                 </td>
-                <td style={{ fontSize: 12 }}>{stripDestinationSuffix(p.state ?? p.city)}</td>
+                <td><PulseCell brief={brief} /></td>
+                <td style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+                  {locationCode(p.state, p.city)}
+                </td>
                 <td><MemberCell name={p.planner} /></td>
                 <td><MemberCell name={p.designer} /></td>
                 <td><MemberCell name={p.project_manager} /></td>

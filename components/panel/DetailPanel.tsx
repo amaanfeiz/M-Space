@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 import { PID_DATA } from '@/lib/static/pid_data_static'
 import { formatInr } from '@/lib/types/project'
 import type { StaticPID } from '@/lib/static/pid_data_static'
+import { BriefBody, type BriefJSON } from '@/components/intelligence/BriefCard'
 
 type DBProject = {
   pid: number
@@ -29,6 +30,12 @@ type DBProject = {
   collection_risk: string | null
   communication_risk: string | null
   sentiment_risk: string | null
+}
+
+type BriefMeta = {
+  json: BriefJSON
+  date: string
+  isCatchup: boolean
 }
 
 function daysUntil(dateStr: string | null): number | null {
@@ -273,22 +280,27 @@ function PanelSkeleton() {
 
 export function DetailPanel() {
   const [openPid, setOpenPid] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState<'brief' | 'details'>('details')
   const [project, setProject] = useState<DBProject | null>(null)
+  const [brief, setBrief] = useState<BriefMeta | null>(null)
+  const [briefLoading, setBriefLoading] = useState(false)
   const [activeSection, setActiveSection] = useState('section-status')
   const bodyRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     function onHashChange() {
-      const match = window.location.hash.match(/^#pid=(\d+)$/)
+      const match = window.location.hash.match(/^#pid=(\d+)(?:&tab=(brief|details))?$/)
       setOpenPid(match ? match[1] : null)
+      setActiveTab((match?.[2] as 'brief' | 'details') ?? 'details')
     }
     onHashChange()
     window.addEventListener('hashchange', onHashChange)
     return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
 
+  // Fetch project data
   useEffect(() => {
-    if (!openPid) { return }
+    if (!openPid) { setProject(null); return }
     const supabase = createClient()
     supabase
       .from('projects')
@@ -300,6 +312,28 @@ export function DetailPanel() {
       })
   }, [openPid])
 
+  // Fetch latest brief for this PID
+  useEffect(() => {
+    if (!openPid) { setBrief(null); return }
+    setBriefLoading(true)
+    const supabase = createClient()
+    supabase
+      .from('briefs')
+      .select('brief_json, brief_date, is_catchup')
+      .eq('pid', parseInt(openPid))
+      .order('brief_date', { ascending: false })
+      .limit(1)
+      .single()
+      .then(({ data }) => {
+        if (data) {
+          setBrief({ json: data.brief_json as BriefJSON, date: data.brief_date, isCatchup: data.is_catchup })
+        } else {
+          setBrief(null)
+        }
+        setBriefLoading(false)
+      })
+  }, [openPid])
+
   useEffect(() => {
     const isOpen = !!openPid
     document.getElementById('panel-overlay')?.classList.toggle('open', isOpen)
@@ -308,7 +342,7 @@ export function DetailPanel() {
   }, [openPid])
 
   function close() {
-    history.pushState('', document.title, window.location.pathname + window.location.search)
+    history.pushState(null, '', window.location.pathname + window.location.search)
     setOpenPid(null)
   }
 
@@ -327,7 +361,7 @@ export function DetailPanel() {
 
   useEffect(() => {
     const body = bodyRef.current
-    if (!body || !openPid) return
+    if (!body || !openPid || activeTab !== 'details') return
     const observer = new IntersectionObserver(
       (entries) => {
         for (const e of entries) {
@@ -339,7 +373,7 @@ export function DetailPanel() {
     const sections = body.querySelectorAll('[data-section]')
     sections.forEach((s) => observer.observe(s))
     return () => observer.disconnect()
-  }, [openPid, project])
+  }, [openPid, project, activeTab])
 
   const staticData = openPid ? (PID_DATA[openPid] ?? null) : null
   const isLoading = openPid !== null && (project === null || String(project.pid) !== openPid)
@@ -364,6 +398,7 @@ export function DetailPanel() {
       <div id="detail-panel">
         {openPid && (
           <>
+            {/* Header */}
             <div className="panel-header">
               <div>
                 <div className="panel-pid">PID {openPid}</div>
@@ -383,7 +418,34 @@ export function DetailPanel() {
               />
             </div>
 
-            {!isLoading && project && (
+            {/* Tab bar */}
+            <div style={{ display: 'flex', borderBottom: '1px solid var(--border-subtle)', paddingLeft: 20 }}>
+              {(['brief', 'details'] as const).map((tab) => (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => setActiveTab(tab)}
+                  style={{
+                    padding: '8px 16px',
+                    fontSize: 12,
+                    fontWeight: activeTab === tab ? 600 : 400,
+                    color: activeTab === tab ? 'var(--accent)' : 'var(--text-muted)',
+                    background: 'none',
+                    border: 'none',
+                    borderBottom: `2px solid ${activeTab === tab ? 'var(--accent)' : 'transparent'}`,
+                    cursor: 'pointer',
+                    marginBottom: -1,
+                    fontFamily: 'inherit',
+                    textTransform: 'capitalize',
+                  }}
+                >
+                  {tab === 'brief' ? 'Brief' : 'Details'}
+                </button>
+              ))}
+            </div>
+
+            {/* Section nav — Details tab only */}
+            {activeTab === 'details' && !isLoading && project && (
               <nav className="panel-section-nav" aria-label="Panel sections">
                 {navItems.map((item) => (
                   <button
@@ -399,80 +461,102 @@ export function DetailPanel() {
             )}
 
             <div className="panel-body" ref={bodyRef}>
-              {isLoading && <PanelSkeleton />}
-              {!isLoading && project && (
+              {/* ── Brief tab ── */}
+              {activeTab === 'brief' && (
+                <div style={{ padding: '16px 0' }}>
+                  {briefLoading && (
+                    <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>Loading brief…</div>
+                  )}
+                  {!briefLoading && brief && (
+                    <BriefBody brief={brief.json} briefDate={brief.date} isCatchup={brief.isCatchup} />
+                  )}
+                  {!briefLoading && !brief && (
+                    <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>
+                      No brief generated yet for this PID.
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ── Details tab ── */}
+              {activeTab === 'details' && (
                 <>
-                  <div id="section-status" data-section className="panel-section-anchor">
-                    <div className="panel-strip-row">
-                      {days !== null && (
-                        <div>
-                          <div className="panel-days-countdown" style={{ color: riskColor }}>{days}</div>
-                          <div className="panel-days-label">Days to event</div>
-                        </div>
-                      )}
-                      <div className="panel-health-badge">
-                        <div style={{ width: 10, height: 10, borderRadius: '50%', background: riskColor, boxShadow: `0 0 8px ${riskColor}40` }} />
-                        <div style={{ fontSize: 9, color: 'var(--text-dim)', marginTop: 3, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                          {riskLevel ?? 'unknown'}
+                  {isLoading && <PanelSkeleton />}
+                  {!isLoading && project && (
+                    <>
+                      <div id="section-status" data-section className="panel-section-anchor">
+                        <div className="panel-strip-row">
+                          {days !== null && (
+                            <div>
+                              <div className="panel-days-countdown" style={{ color: riskColor }}>{days}</div>
+                              <div className="panel-days-label">Days to event</div>
+                            </div>
+                          )}
+                          <div className="panel-health-badge">
+                            <div style={{ width: 10, height: 10, borderRadius: '50%', background: riskColor, boxShadow: `0 0 8px ${riskColor}40` }} />
+                            <div style={{ fontSize: 9, color: 'var(--text-dim)', marginTop: 3, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                              {riskLevel ?? 'unknown'}
+                            </div>
+                          </div>
+                          {staticData && (
+                            <div className="risk-pills">
+                              {staticData.risk_vectors.map((r, i) => (
+                                <span key={i} className={`risk-pill ${r.severity}`}>{r.label}</span>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       </div>
-                      {staticData && (
-                        <div className="risk-pills">
-                          {staticData.risk_vectors.map((r, i) => (
-                            <span key={i} className={`risk-pill ${r.severity}`}>{r.label}</span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
 
-                  {hasAnalysis && (
-                    <div id="section-analysis" data-section className="panel-section-anchor">
-                      <SectionTitle ai>AI Analysis</SectionTitle>
-                      <div className="panel-analysis">
-                        {staticData?.analysis?.map((para, i) => (
-                          <p key={i} dangerouslySetInnerHTML={{ __html: para }} />
-                        ))}
-                        {!staticData && project.current_summary && <p>{project.current_summary}</p>}
-                        {!staticData && project.ai_notes_summary && <p>{project.ai_notes_summary}</p>}
+                      {hasAnalysis && (
+                        <div id="section-analysis" data-section className="panel-section-anchor">
+                          <SectionTitle ai>AI Analysis</SectionTitle>
+                          <div className="panel-analysis">
+                            {staticData?.analysis?.map((para, i) => (
+                              <p key={i} dangerouslySetInnerHTML={{ __html: para }} />
+                            ))}
+                            {!staticData && project.current_summary && <p>{project.current_summary}</p>}
+                            {!staticData && project.ai_notes_summary && <p>{project.ai_notes_summary}</p>}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="panel-2col">
+                        <div className="panel-col">
+                          {staticData && (
+                            <div id="section-team" data-section className="panel-section-anchor">
+                              <TeamSection s={staticData} />
+                            </div>
+                          )}
+                          {staticData && <CommsSection s={staticData} />}
+                          <div id="section-money" data-section className="panel-section-anchor">
+                            <MoneySection p={project} s={staticData} />
+                          </div>
+                        </div>
+                        <div className="panel-col">
+                          {staticData && (
+                            <div id="section-vendor" data-section className="panel-section-anchor">
+                              <VendorSection s={staticData} />
+                            </div>
+                          )}
+                          {staticData && <DecisionSection s={staticData} />}
+                          {staticData && (
+                            <div id="section-actions" data-section className="panel-section-anchor">
+                              <ActionsSection s={staticData} />
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
+
+                      {staticData && (
+                        <div id="section-messages" data-section className="panel-section-anchor">
+                          <MessagesSection s={staticData} />
+                        </div>
+                      )}
+                      {staticData && <TLDirectiveSection s={staticData} />}
+                      {staticData && <SuggestedReplySection s={staticData} />}
+                    </>
                   )}
-
-                  <div className="panel-2col">
-                    <div className="panel-col">
-                      {staticData && (
-                        <div id="section-team" data-section className="panel-section-anchor">
-                          <TeamSection s={staticData} />
-                        </div>
-                      )}
-                      {staticData && <CommsSection s={staticData} />}
-                      <div id="section-money" data-section className="panel-section-anchor">
-                        <MoneySection p={project} s={staticData} />
-                      </div>
-                    </div>
-                    <div className="panel-col">
-                      {staticData && (
-                        <div id="section-vendor" data-section className="panel-section-anchor">
-                          <VendorSection s={staticData} />
-                        </div>
-                      )}
-                      {staticData && <DecisionSection s={staticData} />}
-                      {staticData && (
-                        <div id="section-actions" data-section className="panel-section-anchor">
-                          <ActionsSection s={staticData} />
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {staticData && (
-                    <div id="section-messages" data-section className="panel-section-anchor">
-                      <MessagesSection s={staticData} />
-                    </div>
-                  )}
-                  {staticData && <TLDirectiveSection s={staticData} />}
-                  {staticData && <SuggestedReplySection s={staticData} />}
                 </>
               )}
             </div>
