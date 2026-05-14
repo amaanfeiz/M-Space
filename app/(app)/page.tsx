@@ -26,6 +26,7 @@ export default async function DashboardPage() {
   const [
     { data: projectData, error },
     { data: briefRows },
+    { data: signalRows },
   ] = await Promise.all([
     supabase.from('projects').select(
       'pid, cx_name, status, communication_days, overall_pid_risk, cancellation_risk, current_summary, bgmv, collection_pct, event_start_date, planner, project_health, venue, state, last_message_date, synced_at',
@@ -35,13 +36,37 @@ export default async function DashboardPage() {
       .select('pid, brief_date, brief_json')
       .order('brief_date', { ascending: false })
       .limit(200),
+    supabase
+      .from('signals')
+      .select('pid, sent_at, body')
+      .order('sent_at', { ascending: false })
+      .limit(5000),
   ])
 
-  const projects: Project[] = projectData ?? []
+  const baseProjects: Project[] = projectData ?? []
 
   if (error) {
     console.error('[dashboard] fetch error', error.message)
   }
+
+  // Signals-derived "last contact" per PID — overrides Risk Tracker's
+  // last_message_date and communication_days. Falls back to tracker fields
+  // when a PID hasn't appeared in our recent signals window.
+  const lastSignalByPid = new Map<number, { sentAt: string; body: string | null }>()
+  for (const s of signalRows ?? []) {
+    if (lastSignalByPid.has(s.pid)) continue
+    lastSignalByPid.set(s.pid, { sentAt: s.sent_at, body: s.body })
+  }
+  const projects: Project[] = baseProjects.map((p) => {
+    const last = lastSignalByPid.get(p.pid)
+    if (!last) return p
+    const daysSilent = Math.floor((Date.now() - new Date(last.sentAt).getTime()) / 86400000)
+    return {
+      ...p,
+      last_message_date: last.sentAt,
+      communication_days: daysSilent,
+    }
+  })
 
   // Latest brief per PID
   const briefByPid = new Map<number, BriefJSON>()
