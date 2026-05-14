@@ -95,13 +95,14 @@ export function BriefBody({ brief, briefDate, isCatchup }: { brief: BriefJSON; b
       )}
 
       {/* What Changed */}
-      {brief.what_changed?.length > 0 && (
-        <Section title="What Changed">
-          {brief.what_changed.map((item, i) => (
-            <BulletRow key={i} text={item} />
-          ))}
-        </Section>
-      )}
+      <Section title="What Changed">
+        {brief.what_changed?.length > 0
+          ? brief.what_changed.map((item, i) => (
+              <BulletRow key={i} text={item} />
+            ))
+          : <EmptyLine>No notable changes in this window.</EmptyLine>
+        }
+      </Section>
 
       {/* Commitments */}
       {brief.commitments?.length > 0 && (
@@ -165,26 +166,27 @@ export function BriefBody({ brief, briefDate, isCatchup }: { brief: BriefJSON; b
       )}
 
       {/* Needs You */}
-      {brief.needs_you?.length > 0 && (
-        <Section title="Needs You">
-          {brief.needs_you.map((n, i) => (
-            <div key={i} style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4, display: 'flex', gap: 6, alignItems: 'baseline' }}>
-              <span
-                style={{
-                  fontSize: 9,
-                  fontWeight: 700,
-                  textTransform: 'uppercase',
-                  color: PRIORITY_COLOR[n.priority] ?? 'var(--text-dim)',
-                  flexShrink: 0,
-                }}
-              >
-                {n.priority.replace('_', ' ')}
-              </span>
-              <span style={{ color: 'var(--text-primary)' }}>{n.action}</span>
-            </div>
-          ))}
-        </Section>
-      )}
+      <Section title="Needs You">
+        {brief.needs_you?.length > 0
+          ? brief.needs_you.map((n, i) => (
+              <div key={i} style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4, display: 'flex', gap: 6, alignItems: 'baseline' }}>
+                <span
+                  style={{
+                    fontSize: 9,
+                    fontWeight: 700,
+                    textTransform: 'uppercase',
+                    color: PRIORITY_COLOR[n.priority] ?? 'var(--text-dim)',
+                    flexShrink: 0,
+                  }}
+                >
+                  {n.priority.replace('_', ' ')}
+                </span>
+                <span style={{ color: 'var(--text-primary)' }}>{n.action}</span>
+              </div>
+            ))
+          : <EmptyLine>Nothing requires you right now.</EmptyLine>
+        }
+      </Section>
 
       {/* Clarification Message */}
       <ClarificationSection openQuestions={brief.open_questions} />
@@ -286,6 +288,14 @@ function BulletRow({ text }: { text: string }) {
   return (
     <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4, paddingLeft: 10, borderLeft: '2px solid var(--border-subtle)', lineHeight: 1.6 }}>
       {text}
+    </div>
+  )
+}
+
+function EmptyLine({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{ fontSize: 12, color: 'var(--text-dim)', fontStyle: 'italic', lineHeight: 1.55 }}>
+      {children}
     </div>
   )
 }
