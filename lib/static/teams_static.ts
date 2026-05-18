@@ -1,39 +1,42 @@
 export type TeamConfig = {
   id: string
   label: string
-  planner: { name: string; initials: string; color: string }
-  designer: { name: string | null; initials: string; color: string }
-  pm: { name: string | null; initials: string; color: string }
+  code: string
+  planner:  { name: string; initials: string }
+  designer: { name: string | null; initials: string }
+  pm:       { name: string | null; initials: string }
 }
+
+export const ROLE_COLOR = {
+  planner:  '#7241BE',
+  designer: '#EC4899',
+  pm:       '#14B8A6',
+} as const
 
 export const TEAMS: TeamConfig[] = [
   {
-    id: 'bhavika',
-    label: 'Team Bhavika',
-    planner: { name: 'Bhavika Gurnani', initials: 'BG', color: '#7241BE' },
-    designer: { name: 'Shreyanshu Tiwari', initials: 'ST', color: '#8B5CF6' },
-    pm: { name: 'Varun Mittal', initials: 'VM', color: '#14B8A6' },
+    id: 'bhavika', label: 'Team BSV', code: 'BSV',
+    planner:  { name: 'Bhavika Gurnani',    initials: 'BG' },
+    designer: { name: 'Shreyanshu Tiwari',  initials: 'ST' },
+    pm:       { name: 'Varun Mittal',       initials: 'VM' },
   },
   {
-    id: 'tapasya',
-    label: 'Team Tapasya',
-    planner: { name: 'Tapasya Waldia', initials: 'TW', color: '#7241BE' },
-    designer: { name: 'Somila Bhadauriya', initials: 'SB', color: '#EC4899' },
-    pm: { name: 'Nikhil Gupta', initials: 'NG', color: '#14B8A6' },
+    id: 'tapasya', label: 'Team TSN', code: 'TSN',
+    planner:  { name: 'Tapasya Waldia',     initials: 'TW' },
+    designer: { name: 'Somila Bhadauriya',  initials: 'SB' },
+    pm:       { name: 'Nikhil Gupta',       initials: 'NG' },
   },
   {
-    id: 'anant',
-    label: 'Team Anant',
-    planner: { name: 'Ananth Santhosh', initials: 'AN', color: '#7241BE' },
-    designer: { name: null, initials: '?', color: '#A09890' },
-    pm: { name: null, initials: '?', color: '#A09890' },
+    id: 'anant', label: 'Team A', code: 'A',
+    planner:  { name: 'Ananth Santhosh',    initials: 'AN' },
+    designer: { name: null,                 initials: '?' },
+    pm:       { name: null,                 initials: '?' },
   },
   {
-    id: 'aditya',
-    label: 'Team Aditya',
-    planner: { name: 'Aditya Sharma', initials: 'AS', color: '#F59E0B' },
-    designer: { name: 'Jaishree Patel', initials: 'JP', color: '#EC4899' },
-    pm: { name: 'Narendra Singh', initials: 'NS', color: '#14B8A6' },
+    id: 'aditya', label: 'Team AJN', code: 'AJN',
+    planner:  { name: 'Aditya Sharma',      initials: 'AS' },
+    designer: { name: 'Jaishree Patel',     initials: 'JP' },
+    pm:       { name: 'Narendra Singh',     initials: 'NS' },
   },
 ]
 
@@ -46,6 +49,8 @@ export type ProjectAssignment = {
   overall_pid_risk: string | null
   bgmv: number | null
   event_start_date: string | null
+  t_days: number | null
+  rm: string | null
 }
 
 export type TeamProject = ProjectAssignment & { coverage: 'full' | 'partial' }
@@ -61,6 +66,7 @@ export type TeamGroup = {
 export function groupProjectsByTeam(projects: ProjectAssignment[]): {
   teams: TeamGroup[]
   outliers: ProjectAssignment[]
+  salesWip: ProjectAssignment[]
 } {
   const teams: TeamGroup[] = TEAMS.map((team) => ({
     team,
@@ -71,13 +77,12 @@ export function groupProjectsByTeam(projects: ProjectAssignment[]): {
   }))
 
   const outliers: ProjectAssignment[] = []
+  const salesWip: ProjectAssignment[] = []
 
   for (const p of projects) {
+    if (!p.planner) { salesWip.push(p); continue }
     const team = teams.find((t) => t.team.planner.name === p.planner)
-    if (!team) {
-      outliers.push(p)
-      continue
-    }
+    if (!team) { outliers.push(p); continue }
     const designerMatches = team.team.designer.name === null || team.team.designer.name === p.designer
     const pmMatches = team.team.pm.name === null || team.team.pm.name === p.project_manager
     const coverage: 'full' | 'partial' = designerMatches && pmMatches ? 'full' : 'partial'
@@ -87,5 +92,5 @@ export function groupProjectsByTeam(projects: ProjectAssignment[]): {
     else team.partialCount += 1
   }
 
-  return { teams, outliers }
+  return { teams, outliers, salesWip }
 }

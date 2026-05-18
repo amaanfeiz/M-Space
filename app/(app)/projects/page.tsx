@@ -1,7 +1,9 @@
 import { createClient } from '@/lib/supabase/server'
 import { ProjectsTable } from '@/components/projects/ProjectsTable'
 import { Layers } from 'lucide-react'
+import Link from 'next/link'
 import { ALL_AMAAN_PIDS } from '@/lib/static/all_pids'
+import { TEAMS } from '@/lib/static/teams_static'
 
 interface BriefSummary {
   sentiment: string
@@ -21,8 +23,10 @@ const SENTIMENT_COLOR = {
   positive: 'var(--healthy)',
 } as const
 
-export default async function ProjectsPage() {
+export default async function ProjectsPage({ searchParams }: { searchParams: Promise<{ team?: string }> }) {
   const supabase = await createClient()
+  const params = await searchParams
+  const teamId = params.team
 
   // PHASE-1.5: drop the .in() filter when RLS computes per-user PID access
   // from the projects view's roster columns.
@@ -41,7 +45,12 @@ export default async function ProjectsPage() {
       .limit(200),
   ])
 
-  const projects = data ?? []
+  const allProjects = data ?? []
+
+  const teamConfig = teamId ? TEAMS.find((t) => t.id === teamId) : null
+  const projects = teamConfig
+    ? allProjects.filter((p) => p.planner === teamConfig.planner.name)
+    : allProjects
 
   // Latest brief per PID. "Actions" rolls up urgent items the user is on
   // the hook for: needs_you + unacknowledged_requests. Cross-source flags
@@ -84,7 +93,14 @@ export default async function ProjectsPage() {
             {latestBriefDate && ` · briefs generated ${latestBriefDate}`}
           </p>
         </div>
-        <span className="page-header-badge">{briefCount} briefs</span>
+        {teamConfig ? (
+          <span className="page-header-badge" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            Filtered by {teamConfig.label}
+            <Link href="/projects" style={{ color: 'var(--accent)', textDecoration: 'none', fontSize: 11 }}>· clear</Link>
+          </span>
+        ) : (
+          <span className="page-header-badge">{briefCount} briefs</span>
+        )}
       </div>
 
       {/* Sentiment summary bar */}
