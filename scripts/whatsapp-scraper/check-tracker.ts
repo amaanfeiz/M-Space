@@ -32,10 +32,7 @@ async function main() {
     const { data, error } = await supabase
       .from('projects')
       .select(
-        'pid, cx_name, cx_name_studio, team_lead, planner, designer, project_manager, ' +
-          'event_start_date, event_end_date, venue, region, ' +
-          'package_price_eff, bgmv, collection, collection_pct, ' +
-          'overall_pid_risk, project_health, sentiment, synced_at',
+        'pid, cx_name, cx_name_studio, team_lead, planner, designer, project_manager, event_start_date, event_end_date, venue, region, package_price_eff, bgmv, collection, collection_pct, overall_pid_risk, project_health, sentiment, synced_at',
       )
       .eq('pid', pid)
       .maybeSingle();
