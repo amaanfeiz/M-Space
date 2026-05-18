@@ -3,7 +3,6 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
-  FileText,
   Layers,
   LayoutDashboard,
   type LucideIcon,
@@ -24,7 +23,6 @@ const NAV: NavItem[] = [
   { href: '/projects', label: 'Projects', icon: Layers },
   { href: '/team', label: 'Team', icon: Users },
   { href: '/coplanner', label: 'Coplanner', icon: MessageSquare, beta: true },
-  { href: '/reports', label: 'Reports', icon: FileText },
 ]
 
 type SidebarProps = {

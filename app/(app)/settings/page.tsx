@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { SignOutButton } from '@/components/settings/SignOutButton'
+import { CSVExportButton } from '@/components/reports/CSVExportButton'
 
 // Anthropic pricing for claude-haiku-4-5 in USD per 1M tokens.
 const HAIKU_INPUT_USD_PER_M = 1.00
@@ -19,10 +20,15 @@ export default async function SettingsPage() {
   if (!user) redirect('/login')
 
   // Month-to-date brief generation cost
-  const { data: usageRows } = await supabase
-    .from('briefs')
-    .select('input_tokens, output_tokens')
-    .gte('created_at', monthStart())
+  const [{ data: usageRows }, { data: reportRows }] = await Promise.all([
+    supabase
+      .from('briefs')
+      .select('input_tokens, output_tokens')
+      .gte('created_at', monthStart()),
+    supabase
+      .from('projects')
+      .select('pid, cx_name, status, planner, designer, project_manager, event_start_date, overall_pid_risk, bgmv, collection, collection_pct, venue, state, synced_at'),
+  ])
 
   let inputTokens = 0
   let outputTokens = 0
@@ -34,6 +40,7 @@ export default async function SettingsPage() {
     + (outputTokens / 1_000_000) * HAIKU_OUTPUT_USD_PER_M
   const inr = Math.round(usd * INR_PER_USD)
   const briefsThisMonth = usageRows?.length ?? 0
+  const reportProjects = reportRows ?? []
 
   return (
     <>
@@ -87,6 +94,14 @@ export default async function SettingsPage() {
         <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 8, lineHeight: 1.55 }}>
           Haiku 4.5 — ${HAIKU_INPUT_USD_PER_M.toFixed(2)}/M input · ${HAIKU_OUTPUT_USD_PER_M.toFixed(2)}/M output. INR estimated at ₹{INR_PER_USD}/USD.
         </div>
+      </div>
+
+      <div className="card" style={{ maxWidth: 480, padding: '20px 24px', marginTop: 16 }}>
+        <div className="eyebrow" style={{ marginBottom: 8 }}>Portfolio CSV</div>
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12, lineHeight: 1.5 }}>
+          Export all {reportProjects.length} active PIDs with status, team, risk, and BGMV.
+        </p>
+        <CSVExportButton projects={reportProjects} />
       </div>
     </>
   )

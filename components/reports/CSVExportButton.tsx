@@ -46,7 +46,7 @@ export function CSVExportButton({ projects }: { projects: ProjectRow[] }) {
   }
 
   return (
-    <button className="btn-primary" onClick={download} type="button" style={{ maxWidth: 200 }}>
+    <button className="btn-primary" onClick={download} type="button" style={{ fontSize: 12, padding: '6px 14px', maxWidth: 'fit-content', display: 'inline-block' }}>
       Download CSV
     </button>
   )
