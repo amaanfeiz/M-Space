@@ -72,6 +72,21 @@ export function CoplannerView() {
 
   return (
     <div className="cp-shell">
+      {/* Demo notice */}
+      <div style={{
+        flexShrink: 0,
+        background: 'var(--accent-dim)',
+        borderBottom: '1px solid var(--accent)',
+        padding: '6px 28px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+      }}>
+        <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0, display: 'inline-block' }} />
+        <span style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 500 }}>
+          Demo — seeded conversation only. Full Coplanner ships in Phase 12.
+        </span>
+      </div>
       {/* Header */}
       <div className="cp-header">
         <div className="cp-header-left">
