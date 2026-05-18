@@ -30,7 +30,7 @@ export default async function ProjectsPage() {
   const [{ data }, { data: briefRows }] = await Promise.all([
     supabase
       .from('projects')
-      .select('pid, cx_name, status, planner, designer, project_manager, event_start_date, t_days, overall_pid_risk, bgmv, collection_pct, region, state, city')
+      .select('pid, cx_name, status, planner, designer, project_manager, event_start_date, t_days, overall_pid_risk, bgmv, collection_pct, region, state, city, venue, rm')
       .in('pid', pidList)
       .order('event_start_date', { ascending: true }),
     supabase

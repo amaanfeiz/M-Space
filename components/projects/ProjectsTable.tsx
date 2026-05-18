@@ -1,7 +1,6 @@
 'use client'
 
 import { formatCouple, formatInr } from '@/lib/types/project'
-import { TEAMS } from '@/lib/static/teams_static'
 
 // Routed through a helper so the React purity-during-render lint rule
 // stays quiet. Re-evaluating "now" on each render is intentional —
@@ -25,6 +24,8 @@ type Row = {
   region: string | null
   state: string | null
   city: string | null
+  venue: string | null
+  rm: string | null
 }
 
 interface BriefSummary {
@@ -35,26 +36,6 @@ interface BriefSummary {
   briefDate: string
 }
 
-// Build name → color map from static team config
-const MEMBER_COLORS: Record<string, string> = {}
-for (const t of TEAMS) {
-  if (t.planner.name) MEMBER_COLORS[t.planner.name] = t.planner.color
-  if (t.designer.name) MEMBER_COLORS[t.designer.name] = t.designer.color
-  if (t.pm.name) MEMBER_COLORS[t.pm.name] = t.pm.color
-}
-// Fallback palette for unknown members
-const FALLBACK = ['#7241BE', '#EC4899', '#14B8A6', '#F59E0B', '#3B82F6', '#10B981', '#F97316']
-function memberColor(name: string | null): string {
-  if (!name) return '#A09890'
-  if (MEMBER_COLORS[name]) return MEMBER_COLORS[name]
-  const code = name.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0)
-  return FALLBACK[code % FALLBACK.length]
-}
-
-function initials(name: string | null): string {
-  if (!name) return '?'
-  return name.split(' ').slice(0, 2).map((p) => p[0]?.toUpperCase() ?? '').join('')
-}
 
 // Normalise whatever the DB sends into Critical/Attention/Healthy/null.
 // Used only as a fallback for the row accent when no brief sentiment exists.
@@ -101,22 +82,30 @@ function eventCell(dateStr: string | null) {
 
 function MemberCell({ name }: { name: string | null }) {
   if (!name) return <span style={{ color: 'var(--text-dim)', fontSize: 12 }}>—</span>
-  const color = memberColor(name)
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-      <span style={{
-        width: 22, height: 22, borderRadius: '50%',
-        background: `${color}22`,
-        color,
-        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: 9, fontWeight: 700, flexShrink: 0,
-        border: `1px solid ${color}44`,
-      }}>
-        {initials(name)}
-      </span>
-      <span style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-        {name.split(' ')[0]}
-      </span>
+    <span style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+      {name.split(' ')[0]}
+    </span>
+  )
+}
+
+function VenueCell({ venue }: { venue: string | null }) {
+  if (!venue) return <span style={{ color: 'var(--text-dim)', fontSize: 12 }}>—</span>
+  return (
+    <span
+      title={venue}
+      style={{
+        fontSize: 12,
+        color: 'var(--text-muted)',
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        display: 'inline-block',
+        maxWidth: 160,
+        verticalAlign: 'middle',
+      }}
+    >
+      {venue}
     </span>
   )
 }
@@ -213,7 +202,7 @@ function segment(rows: Row[]) {
   return { active, past, wip }
 }
 
-function ProjectRow({ p, brief, nowMs, muted }: { p: Row; brief: BriefSummary | undefined; nowMs: number; muted?: boolean }) {
+function ProjectRow({ p, brief, nowMs, muted, variant }: { p: Row; brief: BriefSummary | undefined; nowMs: number; muted?: boolean; variant?: 'normal' | 'wip' }) {
   const level = normaliseRisk(p.overall_pid_risk)
   const accentColor = brief?.sentiment
     ? (SENTIMENT_COLOR[brief.sentiment] ?? riskAccent(level))
@@ -232,18 +221,27 @@ function ProjectRow({ p, brief, nowMs, muted }: { p: Row; brief: BriefSummary | 
       <td style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: 13, maxWidth: 160, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
         {formatCouple(p.cx_name)}
       </td>
-      <td><PulseCell brief={brief} nowMs={nowMs} /></td>
       <td style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
         {locationCode(p.state, p.city)}
       </td>
-      <td><MemberCell name={p.planner} /></td>
-      <td><MemberCell name={p.designer} /></td>
-      <td><MemberCell name={p.project_manager} /></td>
+      {variant === 'wip' ? (
+        <td colSpan={3} style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic' }}>
+          {p.rm ? `RM: ${p.rm.split(' ')[0]}` : <span style={{ color: 'var(--text-dim)' }}>RM: —</span>}
+        </td>
+      ) : (
+        <>
+          <td><MemberCell name={p.planner} /></td>
+          <td><MemberCell name={p.designer} /></td>
+          <td><MemberCell name={p.project_manager} /></td>
+        </>
+      )}
+      <td><VenueCell venue={p.venue} /></td>
       <td>{eventCell(p.event_start_date)}</td>
       <td><CollectCell pct={p.collection_pct} /></td>
       <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'var(--text-muted)', paddingRight: 20 }}>
         {formatInr(p.bgmv)}
       </td>
+      <td><PulseCell brief={brief} nowMs={nowMs} /></td>
     </tr>
   )
 }
@@ -251,7 +249,7 @@ function ProjectRow({ p, brief, nowMs, muted }: { p: Row; brief: BriefSummary | 
 function DividerRow({ label }: { label: string }) {
   return (
     <tr style={{ background: 'transparent' }}>
-      <td colSpan={11} style={{
+      <td colSpan={12} style={{
         padding: '14px 14px 6px',
         fontSize: 10,
         fontWeight: 700,
@@ -280,14 +278,15 @@ export function ProjectsTable({ projects, briefMap }: { projects: Row[]; briefMa
             <th style={{ width: 4, padding: 0 }} />
             <th>PID</th>
             <th>Couple</th>
-            <th>Pulse</th>
             <th>Loc</th>
             <th>Planner</th>
             <th>Designer</th>
             <th>PM</th>
+            <th>Venue</th>
             <th>Event</th>
-            <th>Collected</th>
+            <th title="Collected">Coll</th>
             <th style={{ textAlign: 'right' }}>BGMV</th>
+            <th>Pulse</th>
           </tr>
         </thead>
         <tbody>
@@ -300,7 +299,7 @@ export function ProjectsTable({ projects, briefMap }: { projects: Row[]; briefMa
           ))}
           {wip.length > 0 && <DividerRow label={`Sales WIP · planning not started · ${wip.length}`} />}
           {wip.map((p) => (
-            <ProjectRow key={p.pid} p={p} brief={briefMap.get(p.pid)} nowMs={nowMs} muted />
+            <ProjectRow key={p.pid} p={p} brief={briefMap.get(p.pid)} nowMs={nowMs} muted variant="wip" />
           ))}
         </tbody>
       </table>
