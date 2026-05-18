@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import type { Project } from '@/lib/types/project'
 import { formatInr } from '@/lib/types/project'
 import type { BriefJSON } from '@/components/intelligence/BriefBody'
+import { ALL_AMAAN_PIDS } from '@/lib/static/all_pids'
 import { WelcomeBanner } from '@/components/dashboard/WelcomeBanner'
 import { StalledProjects } from '@/components/dashboard/StalledProjects'
 import { MetricsRow } from '@/components/dashboard/MetricsRow'
@@ -31,22 +32,29 @@ export default async function DashboardPage() {
   } = await supabase.auth.getUser()
   if (!user?.email) redirect('/login')
 
+  // PHASE-1.5: drop the .in() filter when RLS scopes data to the
+  // authenticated user's PIDs from the roster columns.
+  const pidList = [...ALL_AMAAN_PIDS]
   const [
     { data: projectData, error },
     { data: briefRows },
     { data: signalRows },
   ] = await Promise.all([
-    supabase.from('projects').select(
-      'pid, cx_name, status, communication_days, overall_pid_risk, cancellation_risk, current_summary, bgmv, collection_pct, event_start_date, planner, project_health, venue, state, last_message_date, synced_at',
-    ),
+    supabase.from('projects')
+      .select(
+        'pid, cx_name, status, communication_days, overall_pid_risk, cancellation_risk, current_summary, bgmv, collection_pct, event_start_date, planner, project_health, venue, state, last_message_date, synced_at',
+      )
+      .in('pid', pidList),
     supabase
       .from('briefs')
       .select('pid, brief_date, brief_json')
+      .in('pid', pidList)
       .order('brief_date', { ascending: false })
       .limit(200),
     supabase
       .from('signals')
       .select('pid, sent_at, body')
+      .in('pid', pidList)
       .order('sent_at', { ascending: false })
       .limit(5000),
   ])

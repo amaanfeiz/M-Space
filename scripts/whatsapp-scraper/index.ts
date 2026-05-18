@@ -3,7 +3,7 @@ import qrcode from 'qrcode-terminal';
 import { createClient } from '@supabase/supabase-js';
 import { config } from 'dotenv';
 import { resolve } from 'path';
-import { ALL_AMAAN_PIDS_STR } from './all-pids';
+import { ALL_AMAAN_PIDS_STR } from '../../lib/static/all_pids';
 
 // Load env from parent project's .env.local
 config({ path: resolve(process.cwd(), '../../.env.local') });

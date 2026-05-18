@@ -3,7 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { config } from 'dotenv';
 import { resolve } from 'path';
 import { writeFileSync, mkdirSync } from 'fs';
-import { ALL_AMAAN_PIDS as ALL_AMAAN_PIDS_RO } from './all-pids';
+import { ALL_AMAAN_PIDS as ALL_AMAAN_PIDS_RO } from '../../lib/static/all_pids';
 
 config({ path: resolve(process.cwd(), '../../.env.local') });
 

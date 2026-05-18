@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { ProjectsTable } from '@/components/projects/ProjectsTable'
 import { Layers } from 'lucide-react'
+import { ALL_AMAAN_PIDS } from '@/lib/static/all_pids'
 
 interface BriefSummary {
   sentiment: string
@@ -23,14 +24,19 @@ const SENTIMENT_COLOR = {
 export default async function ProjectsPage() {
   const supabase = await createClient()
 
+  // PHASE-1.5: drop the .in() filter when RLS computes per-user PID access
+  // from the projects view's roster columns.
+  const pidList = [...ALL_AMAAN_PIDS]
   const [{ data }, { data: briefRows }] = await Promise.all([
     supabase
       .from('projects')
       .select('pid, cx_name, status, planner, designer, project_manager, event_start_date, t_days, overall_pid_risk, bgmv, collection_pct, region, state, city')
+      .in('pid', pidList)
       .order('event_start_date', { ascending: true }),
     supabase
       .from('briefs')
       .select('pid, brief_date, brief_json')
+      .in('pid', pidList)
       .order('brief_date', { ascending: false })
       .limit(200),
   ])
