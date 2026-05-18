@@ -237,7 +237,7 @@ function ProjectRow({ p, brief, nowMs, muted, variant }: { p: Row; brief: BriefS
       )}
       <td><VenueCell venue={p.venue} /></td>
       <td>{eventCell(p.event_start_date)}</td>
-      <td><CollectCell pct={p.collection_pct} /></td>
+      <td style={{ width: 44 }}><CollectCell pct={p.collection_pct} /></td>
       <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'var(--text-muted)', paddingRight: 20 }}>
         {formatInr(p.bgmv)}
       </td>
@@ -284,7 +284,7 @@ export function ProjectsTable({ projects, briefMap }: { projects: Row[]; briefMa
             <th>PM</th>
             <th>Venue</th>
             <th>Event</th>
-            <th title="Collected">Coll</th>
+            <th title="Collected" style={{ width: 44 }}>Coll</th>
             <th style={{ textAlign: 'right' }}>BGMV</th>
             <th>Pulse</th>
           </tr>
