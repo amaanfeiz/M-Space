@@ -35,15 +35,16 @@ export default async function AppLayout({
 
   const { name, initials } = userDisplayFromEmail(user.email)
 
-  // Read last sync time
+  // Read last sync time. sync_log columns are started_at / finished_at —
+  // an earlier query used the non-existent created_at silently.
   const { data: syncLog } = await supabase
     .from('sync_log')
-    .select('created_at')
+    .select('finished_at')
     .eq('status', 'success')
-    .order('created_at', { ascending: false })
+    .order('finished_at', { ascending: false })
     .limit(1)
     .maybeSingle()
-  const syncedAt = syncLog?.created_at ?? null
+  const syncedAt = syncLog?.finished_at ?? null
 
   // Lightweight project list for command palette
   const { data: paletteRows } = await supabase
