@@ -1,8 +1,21 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
+/**
+ * Dev-only auth bypass. Gated on BOTH NODE_ENV === 'development' AND
+ * BYPASS_AUTH === '1' so a leaked env var on Vercel never opens the gate.
+ * Pair with the matching guard in `lib/supabase/server.ts`.
+ */
+function isAuthBypassed(): boolean {
+  return process.env.NODE_ENV === 'development' && process.env.BYPASS_AUTH === '1'
+}
+
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
+
+  if (isAuthBypassed()) {
+    return supabaseResponse
+  }
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
