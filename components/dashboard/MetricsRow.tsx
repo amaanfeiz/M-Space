@@ -3,17 +3,25 @@ import { AnimatedCounter } from './AnimatedCounter'
 type MetricsRowProps = {
   livePids: number
   totalBgmv: string
-  /** Count of urgent needs_you items across all latest briefs. */
-  urgentFlagCount: number
-  /** Count of commitments in open or overdue status across all latest briefs. */
-  openCommitmentCount: number
+  criticalPidCount: number
+  avgCollectionPct: number
+  totalCollected: number
+  totalContracted: number
+}
+
+function formatInrCompact(n: number): string {
+  if (n >= 10_000_000) return `₹${(n / 10_000_000).toFixed(1)}Cr`
+  if (n >= 100_000) return `₹${(n / 100_000).toFixed(1)}L`
+  return `₹${n.toLocaleString('en-IN')}`
 }
 
 export function MetricsRow({
   livePids,
   totalBgmv,
-  urgentFlagCount,
-  openCommitmentCount,
+  criticalPidCount,
+  avgCollectionPct,
+  totalCollected,
+  totalContracted,
 }: MetricsRowProps) {
   return (
     <div className="metrics-bento">
@@ -31,25 +39,25 @@ export function MetricsRow({
         <div className="metric-change change-neutral">Across your portfolio</div>
       </div>
 
-      <div className={`card metric-card stagger-3${urgentFlagCount > 0 ? ' metric-card--critical' : ''}`}>
-        <div className="metric-label">Urgent flags</div>
+      <div className={`card metric-card stagger-3${criticalPidCount > 0 ? ' metric-card--critical' : ''}`}>
+        <div className="metric-label">Critical PIDs</div>
         <div className="metric-number">
           <span className="status-dot dot-critical" style={{ marginRight: 8 }} />
-          <AnimatedCounter value={urgentFlagCount} />
+          <AnimatedCounter value={criticalPidCount} />
         </div>
-        <div className={`metric-change ${urgentFlagCount > 0 ? 'change-bad' : 'change-neutral'}`}>
-          {urgentFlagCount > 0 ? 'Needs immediate action' : 'No urgent flags'}
+        <div className={`metric-change ${criticalPidCount > 0 ? 'change-bad' : 'change-neutral'}`}>
+          {criticalPidCount > 0 ? 'Sentiment cold or anxious' : 'No critical sentiment'}
         </div>
       </div>
 
-      <div className={`card metric-card stagger-4${openCommitmentCount > 0 ? ' metric-card--attention' : ''}`}>
-        <div className="metric-label">Open commitments</div>
+      <div className="card metric-card stagger-4">
+        <div className="metric-label">Avg collection</div>
         <div className="metric-number">
-          <span className="status-dot dot-attention" style={{ marginRight: 8 }} />
-          <AnimatedCounter value={openCommitmentCount} />
+          <AnimatedCounter value={avgCollectionPct} />
+          <span style={{ fontSize: '0.5em', marginLeft: 4 }}>%</span>
         </div>
-        <div className={`metric-change ${openCommitmentCount > 0 ? 'change-bad' : 'change-neutral'}`}>
-          {openCommitmentCount > 0 ? `${openCommitmentCount} pending follow-ups` : 'All commitments closed'}
+        <div className="metric-change change-neutral" style={{ fontVariantNumeric: 'tabular-nums' }}>
+          {formatInrCompact(totalCollected)} of {formatInrCompact(totalContracted)}
         </div>
       </div>
     </div>
