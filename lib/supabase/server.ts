@@ -5,7 +5,7 @@ import type { User } from '@supabase/supabase-js'
 /**
  * Dev-only auth bypass. Gated on BOTH NODE_ENV === 'development' AND
  * BYPASS_AUTH === '1' so a leaked env var on Vercel never opens the gate.
- * Pair with the matching guard in `middleware.ts`.
+ * Pair with the matching guard in `proxy.ts`.
  */
 function isAuthBypassed(): boolean {
   return process.env.NODE_ENV === 'development' && process.env.BYPASS_AUTH === '1'
@@ -45,7 +45,7 @@ export async function createClient() {
               cookieStore.set(name, value, options)
             )
           } catch {
-            // Called from a Server Component — middleware handles session refresh
+            // Called from a Server Component — proxy handles session refresh
           }
         },
       },

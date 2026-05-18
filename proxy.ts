@@ -10,7 +10,7 @@ function isAuthBypassed(): boolean {
   return process.env.NODE_ENV === 'development' && process.env.BYPASS_AUTH === '1'
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
 
   if (isAuthBypassed()) {
