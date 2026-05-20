@@ -160,9 +160,13 @@ async function fillPending(): Promise<number> {
       .eq('pid', stub.pid)
       .eq('role', 'team_lead');
 
-    const tlNames = (senders ?? []).map((s) => s.sender_name);
+    const tlNames = (senders ?? []).map((s) => s.sender_name).filter(Boolean);
 
-    if (tlNames.length === 0) {
+    // Also match by wa_id — sender_name is null for saved contacts in internal groups
+    // (whatsapp-web.js notifyName is empty for phonebook contacts)
+    const tlWaId = process.env.TL_WA_ID ?? null;
+
+    if (tlNames.length === 0 && !tlWaId) {
       console.log(`  PID ${stub.pid} [${stub.brief_date}]: no team_lead sender resolved — skipping.`);
       continue;
     }
@@ -173,16 +177,26 @@ async function fillPending(): Promise<number> {
       new Date(stub.brief_date + 'T00:00:00+05:30').getTime() + 96 * 60 * 60 * 1000,
     ).toISOString();
 
-    const { data: signals } = await supabase
+    // Build query — match by sender_name OR sender_wa_id
+    let query = supabase
       .from('signals')
       .select('id, body, sent_at')
       .eq('pid', stub.pid)
       .eq('chat_type', 'internal')
-      .in('sender_name', tlNames)
       .gte('sent_at', windowStart)
       .lte('sent_at', windowEnd)
       .not('body', 'is', null)
-      .gt('body', ''); // non-empty
+      .gt('body', '');
+
+    if (tlNames.length > 0 && tlWaId) {
+      query = query.or(`sender_name.in.(${tlNames.map(n => `"${n}"`).join(',')}),sender_wa_id.eq.${tlWaId}`);
+    } else if (tlWaId) {
+      query = query.eq('sender_wa_id', tlWaId);
+    } else {
+      query = query.in('sender_name', tlNames);
+    }
+
+    const { data: signals } = await query;
 
     const candidates = (signals ?? [])
       .filter((s) => (s.body?.length ?? 0) > 80) // must be substantive, not a quick ack
