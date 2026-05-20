@@ -1,0 +1,10 @@
+scripts/
+reference/
+logs/
+*.png
+*.jpg
+*.jpeg
+Screenshots/
+OBSIDIAN-UPDATE-BRIEF.md
+POLISH-PHASES-1-4-SPEC.md
+SONNET-KICKOFF-BRIEF.md
