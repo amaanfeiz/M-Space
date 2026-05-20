@@ -275,11 +275,9 @@ interface ProjectRow {
   bgmv: string | null;
   project_health: number | null;
   cancellation_risk: number | null;
-  current_summary: string | null;
   t_days: number | null;
   d_days: number | null;
   sentiment: string | null;
-  overall_risk_summary: string | null;
 }
 
 async function loadProject(pid: number): Promise<ProjectRow | null> {
@@ -288,7 +286,7 @@ async function loadProject(pid: number): Promise<ProjectRow | null> {
     .select(`pid, cx_name, cx_name_studio, event_start_date, event_end_date,
              venue, region, team_lead, planner, designer, project_manager, rm, vendor_manager,
              package_price_eff, collection_pct, bgmv, project_health, cancellation_risk,
-             current_summary, t_days, d_days, sentiment, overall_risk_summary`)
+             t_days, d_days, sentiment`)
     .eq('pid', pid)
     .single<ProjectRow>();
   if (error) { console.error(`  project load error:`, error.message); return null; }
@@ -430,7 +428,7 @@ TRACKER: Package SP: ${rupees(project.package_price_eff)} · GMV: ${rupees(proje
 TRACKER: Collection: ${collectionLine}
 TRACKER: Health: ${project.project_health ?? '?'}/5 · Cancel Risk: ${project.cancellation_risk ?? '?'}/5
 TRACKER: Roster: ${roster}
-TRACKER: Risk summary: ${project.overall_risk_summary ?? '—'}
+TRACKER: Sentiment (tracker): ${project.sentiment ?? '—'}
 
 === KNOWN SENDERS (from resolved roster) ===
 ${[...senders.values()].map((s) => `${s.display_label} (${s.role})`).join(', ') || 'none resolved'}
