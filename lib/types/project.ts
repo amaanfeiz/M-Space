@@ -30,14 +30,8 @@ export function formatCouple(cx_name: string | null): string {
   return cx_name.replace(' & ', ' · ')
 }
 
-export function formatInr(amount: number | null): string {
-  if (!amount) return '—'
-  if (amount >= 10_000_000)
-    return `₹${(amount / 10_000_000).toFixed(2).replace(/\.?0+$/, '')}Cr`
-  if (amount >= 100_000)
-    return `₹${(amount / 100_000).toFixed(1).replace(/\.0$/, '')}L`
-  return `₹${amount.toLocaleString('en-IN')}`
-}
+// Re-export from canonical utility — keeps existing callers working (compact mode)
+export { formatInr } from '@/lib/utils/format-currency'
 
 export function riskDotClass(riskLevel: string | null): string {
   if (riskLevel === 'Critical') return 'dot-critical'
