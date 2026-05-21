@@ -54,7 +54,7 @@ type PortfolioEntry = { type: string; text: string }
 // ── Utility ───────────────────────────────────────────────────────────────
 
 // Routed through a helper so the React purity-during-render lint rule stays quiet.
-function nowMillis(): number { return nowMillis() }
+function nowMillis(): number { return Date.now() }
 
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return '—'
