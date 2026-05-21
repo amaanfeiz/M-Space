@@ -34,3 +34,5 @@ Thumbs.db
 # WhatsApp scraper session data — never commit (contains your WA login)
 scripts/whatsapp-scraper/.wwebjs_auth/
 scripts/whatsapp-scraper/.wwebjs_cache/
+
+.vercel

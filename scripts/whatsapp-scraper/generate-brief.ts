@@ -206,6 +206,7 @@ Read the project context (hard facts from the tracker) and WhatsApp chat signals
 10. FLAG FRAMING: when raising any flag in needs_you or client_pulse, name which risk it represents — sentiment risk, collection risk, visibility risk, process risk, or execution risk. This helps Amaan triage.
 11. ACTION LADDER: when suggesting an action in needs_you, use the lowest-appropriate intervention level — in ascending order: monitor, internal nudge, direct planner call, client-group entry, team reassignment or founder escalation. Do not suggest escalation for issues that monitor or nudge can handle.
 12. PRAISE: avoid generic positive observations ("the team has been responsive"). Only include a positive note if it is specific, actionable, and relevant to a risk Amaan is tracking.
+13. DATE REFERENCES: TODAY is ONLY the brief_date shown at the top of the user prompt after "TODAY:". NEVER use the word "today" to refer to a past commitment deadline, a chat message date, or any other date. If a deadline has passed, say "was due [DD MMM] ([N] days ago)" — never "was due today". If something happened in chat on a specific date, attribute it as "[DD MMM]" or "[N days ago]". The only time "today" is correct is for actions Amaan should take right now, on the brief_date.
 
 ## Sentiment scale
 - positive: client is engaged, enthusiastic, actively moving things forward
@@ -291,6 +292,7 @@ interface ProjectRow {
   t_days: number | null;
   d_days: number | null;
   sentiment: string | null;
+  planning_status: string | null;
 }
 
 async function loadProject(pid: number): Promise<ProjectRow | null> {
@@ -299,11 +301,81 @@ async function loadProject(pid: number): Promise<ProjectRow | null> {
     .select(`pid, cx_name, cx_name_studio, event_start_date, event_end_date,
              venue, region, team_lead, planner, designer, project_manager, rm, vendor_manager,
              package_price_eff, collection_pct, bgmv, project_health, cancellation_risk,
-             t_days, d_days, sentiment`)
+             t_days, d_days, sentiment, planning_status`)
     .eq('pid', pid)
     .single<ProjectRow>();
   if (error) { console.error(`  project load error:`, error.message); return null; }
   return data;
+}
+
+async function loadLastSignalDate(pid: number): Promise<string | null> {
+  const { data } = await supabase
+    .from('signals')
+    .select('sent_at')
+    .eq('pid', pid)
+    .not('body', 'is', null)
+    .order('sent_at', { ascending: false })
+    .limit(1);
+  return data?.[0]?.sent_at ?? null;
+}
+
+function buildSilenceBrief(
+  project: ProjectRow,
+  lastSignalAt: string | null,
+  briefDate: string,
+): BriefJSON {
+  const today = new Date(briefDate + 'T00:00:00+05:30');
+  const lastDate = lastSignalAt ? new Date(lastSignalAt) : null;
+  const daysSilent = lastDate
+    ? Math.floor((today.getTime() - lastDate.getTime()) / (24 * 60 * 60 * 1000))
+    : 999;
+  const lastDateLabel = lastDate
+    ? lastDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', timeZone: 'Asia/Kolkata' })
+    : 'never recorded';
+
+  const firstName = (full: string | null) => (full ?? '').trim().split(/\s+/)[0];
+  const plannerFirst = firstName(project.planner) || 'team';
+
+  const teamStatus: BriefJSON['team_status'] = [];
+  if (project.planner) teamStatus.push({
+    display_label: `${firstName(project.planner)} (Planner)`,
+    role: 'planner',
+    last_active_date: '',
+    activity_note: `Silent ${daysSilent}d — no visible activity in the 14-day window.`,
+  });
+  if (project.designer) teamStatus.push({
+    display_label: `${firstName(project.designer)} (Designer)`,
+    role: 'designer',
+    last_active_date: '',
+    activity_note: `Silent ${daysSilent}d — no visible activity in the 14-day window.`,
+  });
+  if (project.project_manager) teamStatus.push({
+    display_label: `${firstName(project.project_manager)} (PM)`,
+    role: 'project_manager',
+    last_active_date: '',
+    activity_note: `Silent ${daysSilent}d — no visible activity in the 14-day window.`,
+  });
+
+  return {
+    client_pulse: {
+      sentiment: 'cold',
+      confidence: 'high',
+      summary: `No client or team activity in the 14-day window. Last signal in this project was ${lastDateLabel} (${daysSilent} days ago). Project status is Planning In-Progress with ${plannerFirst} assigned — silence on an active planning project is itself the signal.`,
+      days_silent: daysSilent,
+    },
+    team_status: teamStatus,
+    what_changed: [`No team or client activity in window. Last signal was ${lastDateLabel} (${daysSilent} days ago).`],
+    commitments: [],
+    needs_you: [{
+      action: `Silence risk: PID silent ${daysSilent} days. Last activity ${lastDateLabel}. Project is Planning In-Progress with ${project.planner} as planner — chase status with planner today and confirm whether project is genuinely stalled or just off-channel.`,
+      priority: 'urgent',
+    }],
+    unacknowledged_requests: [],
+    open_questions: {
+      clarification_message: `Hey @${plannerFirst}, this project has been silent ${daysSilent} days since ${lastDateLabel}. Please confirm status with the couple today and share what is blocking progress. If anything was discussed on call, please ensure there is a text trail.`,
+    },
+    cross_source_flags: [],
+  };
 }
 
 interface FeedbackRow {
@@ -697,7 +769,30 @@ async function main() {
     ]);
 
     if (!project) { console.log('SKIP (project not found)'); failed++; continue; }
-    if (signals.length === 0) { console.log('SKIP (no signals in window)'); failed++; continue; }
+    if (signals.length === 0) {
+      // Silence-brief path: active Planning In-Progress PIDs with an assigned planner
+      // still need a brief — silence is the signal. Skip terminal/paused/Sales WIP.
+      const isActive = project.planning_status === 'Planning In-Progress';
+      const hasPlanner = Boolean(project.planner);
+      if (!isActive || !hasPlanner) {
+        console.log(`SKIP (no signals; status=${project.planning_status ?? 'null'}, planner=${project.planner ?? 'null'})`);
+        failed++;
+        continue;
+      }
+      const lastSignalAt = await loadLastSignalDate(pid);
+      const silenceBrief = buildSilenceBrief(project, lastSignalAt, briefDate);
+      try {
+        await writeToDB(pid, briefDate, silenceBrief, { input_tokens: 0, output_tokens: 0 }, isCatchup);
+        writeMarkdownFiles(project, silenceBrief, briefDate, isCatchup);
+      } catch (err) {
+        console.log(`FAILED (silence write: ${err instanceof Error ? err.message : err})`);
+        failed++;
+        continue;
+      }
+      console.log(`SILENCE  cold ${silenceBrief.client_pulse.days_silent}d`);
+      ok++;
+      continue;
+    }
 
     const userPrompt = buildUserPrompt(project, senders, signals, feedback, isCatchup, briefDate);
     const result = await callHaiku(userPrompt);
