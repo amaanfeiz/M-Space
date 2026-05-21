@@ -189,7 +189,7 @@ const SYSTEM_PROMPT = `You are Amaan's strategic portfolio copilot. Amaan is Tea
 interface BriefRow {
   pid: number;
   brief_date: string;
-  brief_json: any;
+  brief_json: Record<string, unknown>;
   is_catchup: boolean;
   projects: {
     cx_name: string | null;

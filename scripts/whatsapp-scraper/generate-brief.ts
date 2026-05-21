@@ -201,6 +201,11 @@ Read the project context (hard facts from the tracker) and WhatsApp chat signals
    (h) If there is nothing to clarify, set clarification_message to an empty string.
 6. CROSS-SOURCE FLAGS: only raise a flag when chat clearly contradicts a tracker field you've been given. Do not flag speculative differences.
 7. NEEDS YOU: surface only things that genuinely require Amaan's decision or action. Not routine updates.
+8. ATTRIBUTION OF BLAME: separate client engagement risk from planner ownership failure. If the client is silent but the planner has been proactive and followed up, do NOT frame this as a planner issue. Blame must match evidence.
+9. OVER-FLAGGING: do not flag isolated words like "delay" or "waiting" as risk signals. Tie severity to: repetition, blame pattern, payment proximity, event proximity, and whether the team broke a communication loop.
+10. FLAG FRAMING: when raising any flag in needs_you or client_pulse, name which risk it represents — sentiment risk, collection risk, visibility risk, process risk, or execution risk. This helps Amaan triage.
+11. ACTION LADDER: when suggesting an action in needs_you, use the lowest-appropriate intervention level — in ascending order: monitor, internal nudge, direct planner call, client-group entry, team reassignment or founder escalation. Do not suggest escalation for issues that monitor or nudge can handle.
+12. PRAISE: avoid generic positive observations ("the team has been responsive"). Only include a positive note if it is specific, actionable, and relevant to a risk Amaan is tracking.
 
 ## Sentiment scale
 - positive: client is engaged, enthusiastic, actively moving things forward
@@ -316,20 +321,30 @@ async function loadRecentFeedback(pid: number): Promise<FeedbackRow[]> {
   return (data ?? []) as FeedbackRow[];
 }
 
-async function loadSenders(pid: number): Promise<Map<string, { display_label: string; role: string }>> {
+interface SenderInfo { display_label: string; role: string }
+
+async function loadSenders(pid: number): Promise<{
+  byName: Map<string, SenderInfo>;
+  byWaId: Map<string, SenderInfo>;
+}> {
   const { data } = await supabase
     .from('signal_senders')
-    .select('sender_name, display_label, role')
+    .select('sender_name, sender_wa_id, display_label, role')
     .eq('pid', pid);
-  const map = new Map<string, { display_label: string; role: string }>();
+  const byName = new Map<string, SenderInfo>();
+  const byWaId = new Map<string, SenderInfo>();
   for (const row of data ?? []) {
-    if (row.display_label) map.set(row.sender_name, { display_label: row.display_label, role: row.role });
+    if (!row.display_label) continue;
+    const info = { display_label: row.display_label, role: row.role };
+    if (row.sender_name) byName.set(row.sender_name, info);
+    if (row.sender_wa_id) byWaId.set(row.sender_wa_id, info);
   }
-  return map;
+  return { byName, byWaId };
 }
 
 interface SignalRow {
   sender_name: string | null;
+  sender_wa_id: string | null;
   body: string | null;
   sent_at: string;
   chat_type: string | null;
@@ -342,7 +357,7 @@ async function loadSignals(pid: number, catchup: boolean): Promise<SignalRow[]> 
 
   const { data } = await supabase
     .from('signals')
-    .select('sender_name, body, sent_at, chat_type')
+    .select('sender_name, sender_wa_id, body, sent_at, chat_type')
     .eq('pid', pid)
     .not('body', 'is', null)
     .gte('sent_at', cutoff)
@@ -367,7 +382,7 @@ function formatTime(iso: string): string {
 
 function buildUserPrompt(
   project: ProjectRow,
-  senders: Map<string, { display_label: string; role: string }>,
+  senders: { byName: Map<string, SenderInfo>; byWaId: Map<string, SenderInfo> },
   signals: SignalRow[],
   feedback: FeedbackRow[],
   catchup: boolean,
@@ -404,9 +419,12 @@ function buildUserPrompt(
   // Format signals; if over MAX_CHARS, drop oldest first to keep most recent
   const MAX_CHARS = 90_000;
   const allSignalLines = signals.map((sig) => {
-    const senderKey = sig.sender_name ?? '';
-    const senderInfo = senders.get(senderKey);
-    const label = senderInfo?.display_label ?? senderKey ?? 'Unknown';
+    const senderInfo = sig.sender_name
+      ? senders.byName.get(sig.sender_name)
+      : sig.sender_wa_id
+      ? senders.byWaId.get(sig.sender_wa_id)
+      : undefined;
+    const label = senderInfo?.display_label ?? sig.sender_name ?? sig.sender_wa_id ?? 'Unknown';
     const groupTag = sig.chat_type === 'client' ? '[client]' : '[internal]';
     return `[${formatDate(sig.sent_at)} ${formatTime(sig.sent_at)}] ${groupTag} ${label}: ${sig.body}`;
   });
@@ -439,7 +457,7 @@ TRACKER: Roster: ${roster}
 TRACKER: Sentiment (tracker): ${project.sentiment ?? '—'}
 
 === KNOWN SENDERS (from resolved roster) ===
-${[...senders.values()].map((s) => `${s.display_label} (${s.role})`).join(', ') || 'none resolved'}
+${[...senders.byName.values(), ...senders.byWaId.values()].map((s) => `${s.display_label} (${s.role})`).join(', ') || 'none resolved'}
 
 === PRIOR USER FEEDBACK ON BRIEFS FOR THIS PID ===
 ${feedback.length === 0
