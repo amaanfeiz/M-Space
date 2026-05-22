@@ -288,7 +288,6 @@ async function main() {
   console.log(`Seeding ${SOPS.length} SOPs into public.sops...\n`);
 
   let inserted = 0;
-  let updated = 0;
 
   for (const s of SOPS) {
     const { error } = await supabase

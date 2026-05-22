@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
+  BarChart3,
   Layers,
   LayoutDashboard,
   type LucideIcon,
@@ -22,6 +23,7 @@ const NAV: NavItem[] = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/projects', label: 'Projects', icon: Layers },
   { href: '/team', label: 'Team', icon: Users },
+  { href: '/portfolio', label: 'Portfolio', icon: BarChart3 },
   { href: '/coplanner', label: 'Coplanner', icon: MessageSquare, beta: true },
 ]
 
