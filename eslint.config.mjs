@@ -1,0 +1,21 @@
+import { defineConfig, globalIgnores } from "eslint/config";
+import nextVitals from "eslint-config-next/core-web-vitals";
+import nextTs from "eslint-config-next/typescript";
+
+const eslintConfig = defineConfig([
+  ...nextVitals,
+  ...nextTs,
+  // Override default ignores of eslint-config-next.
+  globalIgnores([
+    // Default ignores of eslint-config-next:
+    ".next/**",
+    "out/**",
+    "build/**",
+    "next-env.d.ts",
+    // WhatsApp Web session bundle — minified vendor JS, never our code.
+    "scripts/whatsapp-scraper/.wwebjs_auth/**",
+    "scripts/whatsapp-scraper/.wwebjs_cache/**",
+  ]),
+]);
+
+export default eslintConfig;
