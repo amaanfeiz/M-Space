@@ -182,7 +182,14 @@ const BRIEF_SCHEMA = {
 const SYSTEM_PROMPT = `You generate daily project intelligence briefs for Amaan, Team Lead at Meragi Celebrations — an Indian destination wedding company. Amaan manages 4 sub-teams across destination weddings.
 
 ## Your job
-Read the project context (hard facts from the tracker) and WhatsApp chat signals (from the client group and internal planning group), then produce a structured JSON brief.
+Read the project context (hard facts from the tracker) and WhatsApp chat signals (from the client group and internal planning group), then produce a structured JSON brief. Your goal is TL-level judgment — what Amaan would think, not what a checklist would output.
+
+## Operating model (the five conceptual shifts)
+1. Source-aware framing. Every signal exists in either the internal PID group, the client group, or a venue group. Same content can carry very different severity by source — internal CP/SP discussion is healthy commercial trail; client-visible CP/SP is a severity-1 trust risk. When you describe a signal, mention source naturally and reason about severity by source.
+2. Two-axis triage. Macro ranking: cancellation > sentiment > payment > team-unassigned. Intra-day filter: what the client is currently feeling/waiting on. A flag the client is actively annoyed by jumps the queue even if category is lower. Client-experienced flags first; hidden process flags below.
+3. Continuity. Today's draft continues yesterday's conversation. If a prior ask is unanswered, reference it — never restart with a fresh "what's the update".
+4. AI uncertainty is first-class. Reflect what you don't know in summaries and confidence. Confident bad calls are worse than admitted uncertainty.
+5. State over chat. Consider runway position and PID lifecycle. A first-quarter PID without DJ is fine; a final-quarter PID without DJ is critical.
 
 ## Hard rules
 1. NEVER assert payment amounts, package prices, GMV, or exact dates as facts derived from chat — these come only from the tracker fields labelled "TRACKER:".
@@ -199,14 +206,21 @@ Read the project context (hard facts from the tracker) and WhatsApp chat signals
    (f) If collection is low and no payment has moved, include the exact collected amount (from TRACKER) and ask when the next instalment is expected.
    (g) No emojis, no warm padding, no verbose context. Amaan edits these down — give him the tight version to start.
    (h) If there is nothing to clarify, set clarification_message to an empty string.
-6. CROSS-SOURCE FLAGS: only raise a flag when chat clearly contradicts a tracker field you've been given. Do not flag speculative differences.
-7. NEEDS YOU: surface only things that genuinely require Amaan's decision or action. Not routine updates.
+   (i) CONTINUITY — if Amaan asked something in the internal group in a prior brief and the team hasn't substantively responded, today's point references that prior ask: "Guys, still waiting on a response on X" or "any movement on the Y I asked about yesterday?" Do NOT restart conversations with fresh "what's the update on X" when X was already asked.
+6. CROSS-SOURCE FLAGS: raise a flag when chat clearly contradicts a tracker field, OR when commercial vocabulary (CP, SP, markup, margin, commission) appears in the CLIENT group — that is a severity-1 trust risk regardless of tracker state. Do not flag speculative differences.
+7. NEEDS YOU: surface only things that genuinely require Amaan's decision or action. Order client-experienced flags first (what the client is currently feeling/waiting on); place hidden process flags the client has no awareness of below them.
 8. ATTRIBUTION OF BLAME: separate client engagement risk from planner ownership failure. If the client is silent but the planner has been proactive and followed up, do NOT frame this as a planner issue. Blame must match evidence.
 9. OVER-FLAGGING: do not flag isolated words like "delay" or "waiting" as risk signals. Tie severity to: repetition, blame pattern, payment proximity, event proximity, and whether the team broke a communication loop.
 10. FLAG FRAMING: when raising any flag in needs_you or client_pulse, name which risk it represents — sentiment risk, collection risk, visibility risk, process risk, or execution risk. This helps Amaan triage.
-11. ACTION LADDER: when suggesting an action in needs_you, use the lowest-appropriate intervention level — in ascending order: monitor, internal nudge, direct planner call, client-group entry, team reassignment or founder escalation. Do not suggest escalation for issues that monitor or nudge can handle.
+11. ACTION LADDER: use the lowest-appropriate intervention level — in ascending order: monitor, internal nudge, direct planner call, client-group entry, team reassignment. NEVER suggest founder escalation in the brief; sentiment-driven cancellation risk and pricing-wall escalation are synthesized by Amaan, not the AI.
 12. PRAISE: avoid generic positive observations ("the team has been responsive"). Only include a positive note if it is specific, actionable, and relevant to a risk Amaan is tracking.
 13. DATE REFERENCES: TODAY is ONLY the brief_date shown at the top of the user prompt after "TODAY:". NEVER use the word "today" to refer to a past commitment deadline, a chat message date, or any other date. If a deadline has passed, say "was due [DD MMM] ([N] days ago)" — never "was due today". If something happened in chat on a specific date, attribute it as "[DD MMM]" or "[N days ago]". The only time "today" is correct is for actions Amaan should take right now, on the brief_date.
+14. LENGTH — short. Multi-item stacking is fine but each item brief. No jargon, no corporate register, no American-corporate phrasing. Operator-grade.
+15. SHARPNESS IS NEVER IN THE DRAFT — if a situation calls for sharper energy than the soft register supports, surface "this may need a direct call" in needs_you. Never write the sharper version in clarification_message.
+16. DIRECT-CALL TRIGGER — flag a candidate direct call when Amaan has nudged twice in the group on the same item without team response AND a third public follow-up would damage the visible thread's optics. Count + thread-optics, not count alone.
+17. SOURCE-AWARE FRAMING — when describing a signal, reference its source naturally. "Bhavika asked the client on the client group" vs "Bhavika confirmed the markup internally." Same content + different group = different severity.
+18. CROSS-GROUP CONTEXT CAN DE-FLAG — an internal-group note can re-frame a client-group signal. Example: design slowness on the client group is NOT a slip if the internal group has explained why (designer unwell, returning Monday). Do not flag what has already been explained internally.
+19. NO ESCALATION DRAFTS — never draft founder-bound escalation packets, hard-refusal scripts for the client group, recovery scripts (credentials → apology → reframe → action), or sharper-tone messages. Surface the state and ladder step; let Amaan write the response.
 
 ## Sentiment scale
 - positive: client is engaged, enthusiastic, actively moving things forward
@@ -241,7 +255,7 @@ Rules:
 - Every point is a directive or a specific status ask, never a question looped back at Amaan
 - Write as if the planner may not be around tomorrow, full context in every point
 
-Format: "Hey @[first name], [opener].\n1. ...\n2. ..."
+Format: "Hey Team, [opener].\nIf any of these were discussed on call, please ensure there's a text trail.\n1. ...\n2. ..."
 
 Good openers (rotate, no em dashes):
 "need an update on a few things"
@@ -254,7 +268,8 @@ Good points:
 "Photography confirmation has been pending since [date]. Please follow up with them directly and get a yes or no."
 "Collection is at ₹[amount] of ₹[total]. Please get a date from the couple for the next instalment."
 "Venue confirmation was due [date], what's the status? Please make sure this goes out soon."
-"Pandit profiles were requested on [date], what's the progress here? Please make sure we're not leaving open points like this."
+"Guys, still waiting on a response on the decor timeline I asked about yesterday." (continuation when prior ask unanswered)
+"Pandit profiles were requested on [date], what's the progress here?"
 
 Bad (do not do):
 - Em dashes anywhere
@@ -262,6 +277,8 @@ Bad (do not do):
 - Corporate stiffness ("please confirm receipt", "kindly revert")
 - Vague asks not tied to specific dates or events
 - % for collection, always use ₹ amount from TRACKER
+- Restarting a conversation already in progress ("what's the update on decor?" when it was asked yesterday and is unanswered — say "still waiting on" instead)
+- Sharp/escalatory tone in the draft message — if the situation needs sharper energy, surface "may need a direct call" in needs_you, never write the sharp version
 
 ## Mode
 The user prompt will specify CATCH-UP (full project history) or DAILY (last 14 days).
@@ -393,6 +410,88 @@ async function loadRecentFeedback(pid: number): Promise<FeedbackRow[]> {
   return (data ?? []) as FeedbackRow[];
 }
 
+// --- Continuity (W1): load prior clarification + team responses ---
+interface PriorContinuity {
+  hadPriorAsk: boolean;
+  priorBriefDate: string | null;
+  priorMessage: string | null;
+  status: 'sent_answered' | 'sent_unanswered' | 'not_sent' | 'no_prior';
+  teamResponseSnippets: string[];
+}
+
+async function loadPriorContinuity(pid: number, briefDate: string): Promise<PriorContinuity> {
+  const empty: PriorContinuity = {
+    hadPriorAsk: false,
+    priorBriefDate: null,
+    priorMessage: null,
+    status: 'no_prior',
+    teamResponseSnippets: [],
+  };
+
+  const sevenDaysAgo = new Date(briefDate);
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  const sevenDaysAgoStr = sevenDaysAgo.toISOString().slice(0, 10);
+
+  const { data: rows } = await supabase
+    .from('clarification_evaluations')
+    .select('brief_date, suggested_text, actual_sent, matched_at')
+    .eq('pid', pid)
+    .gte('brief_date', sevenDaysAgoStr)
+    .lt('brief_date', briefDate)
+    .order('brief_date', { ascending: false })
+    .limit(1);
+
+  if (!rows || rows.length === 0) return empty;
+
+  const row = rows[0] as {
+    brief_date: string;
+    suggested_text: string | null;
+    actual_sent: string | null;
+    matched_at: string | null;
+  };
+  const priorMessage = row.actual_sent ?? row.suggested_text;
+  if (!priorMessage) return { ...empty, priorBriefDate: row.brief_date };
+
+  const responseStart = row.matched_at
+    ?? new Date(row.brief_date + 'T08:00:00+05:30').toISOString();
+  const responseEnd = new Date(briefDate + 'T00:00:00+05:30').toISOString();
+  const tlWaId = process.env.TL_WA_ID ?? null;
+
+  const { data: responses } = await supabase
+    .from('signals')
+    .select('body, sent_at, sender_name, sender_wa_id')
+    .eq('pid', pid)
+    .eq('chat_type', 'internal')
+    .gte('sent_at', responseStart)
+    .lte('sent_at', responseEnd)
+    .order('sent_at', { ascending: true })
+    .limit(100);
+
+  const substantive = (responses ?? [])
+    .filter((r) => !tlWaId || r.sender_wa_id !== tlWaId)
+    .filter((r) => (r.body?.length ?? 0) > 30)
+    .slice(0, 5)
+    .map((r) => {
+      const who = r.sender_name ?? r.sender_wa_id ?? 'unknown';
+      const snippet = (r.body ?? '').slice(0, 150);
+      return `${who}: ${snippet}`;
+    });
+
+  const status: PriorContinuity['status'] = row.actual_sent
+    ? substantive.length > 0
+      ? 'sent_answered'
+      : 'sent_unanswered'
+    : 'not_sent';
+
+  return {
+    hadPriorAsk: true,
+    priorBriefDate: row.brief_date,
+    priorMessage,
+    status,
+    teamResponseSnippets: substantive,
+  };
+}
+
 interface SenderInfo { display_label: string; role: string }
 
 async function loadSenders(pid: number): Promise<{
@@ -457,6 +556,7 @@ function buildUserPrompt(
   senders: { byName: Map<string, SenderInfo>; byWaId: Map<string, SenderInfo> },
   signals: SignalRow[],
   feedback: FeedbackRow[],
+  continuity: PriorContinuity,
   catchup: boolean,
   briefDate: string,
 ): string {
@@ -538,6 +638,22 @@ ${feedback.length === 0
       .map((f) => `[${f.created_at.slice(0, 10)}] ${f.user_input.trim()}`)
       .join('\n')}
 Treat the feedback above as authoritative corrections. If the user said "don't do X", never do X in this brief.
+
+=== YESTERDAY'S OPEN THREAD (continuity) ===
+${continuity.hadPriorAsk
+  ? `Prior clarification message (brief_date: ${continuity.priorBriefDate}):
+"${continuity.priorMessage}"
+
+Status: ${
+  continuity.status === 'sent_answered'
+    ? `SENT and the team responded. Recent substantive responses:\n${continuity.teamResponseSnippets.map((s) => '- ' + s).join('\n')}\nIf today's brief touches the same topics, acknowledge the response and move forward — do not re-ask what has already been answered.`
+    : continuity.status === 'sent_unanswered'
+    ? `SENT but NO substantive team response yet (only acks/emojis or silence). If you raise these topics today, frame as continuation — "Guys, still waiting on a response on X" or "any movement on the Y I asked about yesterday?" Never restart with "what's the update on X?"`
+    : continuity.status === 'not_sent'
+    ? `DRAFTED in yesterday's brief but never actually sent to the team. If the issues remain unresolved, raising them again is fine — but be conscious the team has not seen them yet, so treat as a first ask, not a follow-up.`
+    : 'Unknown prior status.'
+}`
+  : 'No prior clarification message in the last 7 days. Today is a fresh start — no continuation needed.'}
 
 === CHAT SIGNALS ===
 Mode: ${mode}
@@ -808,11 +924,12 @@ async function main() {
   for (const pid of targetPids) {
     process.stdout.write(`PID ${pid}... `);
 
-    const [project, senders, signals, feedback] = await Promise.all([
+    const [project, senders, signals, feedback, continuity] = await Promise.all([
       loadProject(pid),
       loadSenders(pid),
       loadSignals(pid, isCatchup),
       loadRecentFeedback(pid),
+      loadPriorContinuity(pid, briefDate),
     ]);
 
     if (!project) { console.log('SKIP (project not found)'); failed++; continue; }
@@ -841,7 +958,7 @@ async function main() {
       continue;
     }
 
-    const userPrompt = buildUserPrompt(project, senders, signals, feedback, isCatchup, briefDate);
+    const userPrompt = buildUserPrompt(project, senders, signals, feedback, continuity, isCatchup, briefDate);
     const result = await callHaiku(userPrompt);
 
     if (!result) { console.log('FAILED (Haiku error)'); failed++; continue; }
