@@ -677,25 +677,25 @@ async function persistClarifications(
 
   const briefId = briefRow?.id ?? null;
 
-  const rows = clarifications.map((c) => ({
-    pid,
-    brief_id: briefId,
-    brief_date: briefDate,
-    question: c.question,
-    ai_uncertainty_reason: c.reason,
-    category: c.category,
-  }));
+  // Insert one at a time; ignore duplicate-key errors (unique index on md5(question)
+  // prevents duplicates when the same brief is regenerated, but Supabase upsert
+  // can't reference expression indexes via onConflict — so we catch 23505 manually).
+  for (const c of clarifications) {
+    const { error } = await supabase
+      .from('brief_clarifications')
+      .insert({
+        pid,
+        brief_id: briefId,
+        brief_date: briefDate,
+        question: c.question,
+        ai_uncertainty_reason: c.reason,
+        category: c.category,
+      });
 
-  const { error } = await supabase
-    .from('brief_clarifications')
-    .upsert(rows, {
-      onConflict: 'pid,brief_date,md5(question)',
-      ignoreDuplicates: true,
-    });
-
-  if (error) {
-    // Soft-fail: don't break the pipeline over clarification persistence.
-    console.error(`  clarification persistence error (PID ${pid}):`, error.message);
+    if (error && error.code !== '23505' && !error.message.toLowerCase().includes('duplicate')) {
+      // Soft-fail: don't break the pipeline over clarification persistence.
+      console.error(`  clarification persistence error (PID ${pid}):`, error.message);
+    }
   }
 }
 
