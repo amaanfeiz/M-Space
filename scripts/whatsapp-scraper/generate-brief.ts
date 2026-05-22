@@ -630,6 +630,76 @@ async function loadPriorContinuity(pid: number, briefDate: string): Promise<Prio
 interface SenderInfo { display_label: string; role: string }
 
 // =====================================================================
+// Step 7: Load prior AI-clarifications that Amaan has answered.
+// =====================================================================
+
+interface AnsweredClarification {
+  question: string;
+  answer: string;
+  answered_at: string;
+  category: string;
+}
+
+async function loadAnsweredClarifications(pid: number): Promise<AnsweredClarification[]> {
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const { data } = await supabase
+    .from('brief_clarifications')
+    .select('question, amaan_answer, answered_at, category')
+    .eq('pid', pid)
+    .not('amaan_answer', 'is', null)
+    .gte('answered_at', thirtyDaysAgo)
+    .order('answered_at', { ascending: false })
+    .limit(5);
+  return (data ?? []).map((r) => ({
+    question: r.question as string,
+    answer: (r.amaan_answer as string) ?? '',
+    answered_at: (r.answered_at as string) ?? '',
+    category: (r.category as string) ?? 'other',
+  }));
+}
+
+async function persistClarifications(
+  pid: number,
+  briefDate: string,
+  isCatchup: boolean,
+  clarifications: BriefJSON['ai_clarification'],
+): Promise<void> {
+  if (clarifications.length === 0) return;
+
+  // Look up brief_id for the just-written brief row.
+  const { data: briefRow } = await supabase
+    .from('briefs')
+    .select('id')
+    .eq('pid', pid)
+    .eq('brief_date', briefDate)
+    .eq('is_catchup', isCatchup)
+    .maybeSingle<{ id: string }>();
+
+  const briefId = briefRow?.id ?? null;
+
+  const rows = clarifications.map((c) => ({
+    pid,
+    brief_id: briefId,
+    brief_date: briefDate,
+    question: c.question,
+    ai_uncertainty_reason: c.reason,
+    category: c.category,
+  }));
+
+  const { error } = await supabase
+    .from('brief_clarifications')
+    .upsert(rows, {
+      onConflict: 'pid,brief_date,md5(question)',
+      ignoreDuplicates: true,
+    });
+
+  if (error) {
+    // Soft-fail: don't break the pipeline over clarification persistence.
+    console.error(`  clarification persistence error (PID ${pid}):`, error.message);
+  }
+}
+
+// =====================================================================
 // pid_state loader + deterministic brief field computations (Steps 5/6/9/10)
 // =====================================================================
 
@@ -947,6 +1017,7 @@ function buildUserPrompt(
   feedback: FeedbackRow[],
   continuity: PriorContinuity,
   pidState: PidState | null,
+  answeredClarifications: AnsweredClarification[],
   catchup: boolean,
   briefDate: string,
 ): string {
@@ -1044,6 +1115,13 @@ ${feedback.length === 0
       .map((f) => `[${f.created_at.slice(0, 10)}] ${f.user_input.trim()}`)
       .join('\n')}
 Treat the feedback above as authoritative corrections. If the user said "don't do X", never do X in this brief.
+
+=== PRIOR AMAAN-ANSWERED CLARIFICATIONS (authoritative context) ===
+${answeredClarifications.length === 0
+  ? 'No prior clarifications answered for this PID.'
+  : answeredClarifications.map((c) => `[${(c.answered_at || '').slice(0, 10)}] ${c.category.toUpperCase()} — Q: ${c.question}\n  A: ${c.answer}`).join('\n\n')
+}
+Use these answers as authoritative context. Do not re-ask what Amaan has already answered. Reflect the answers in your reasoning (e.g. if Amaan said "Aditya is off this week," don't flag Aditya's silence as a process issue).
 
 === YESTERDAY'S OPEN THREAD (continuity) ===
 ${continuity.hadPriorAsk
@@ -1375,13 +1453,14 @@ async function main() {
   for (const pid of targetPids) {
     process.stdout.write(`PID ${pid}... `);
 
-    const [project, senders, signals, feedback, continuity, pidState] = await Promise.all([
+    const [project, senders, signals, feedback, continuity, pidState, answeredClarifications] = await Promise.all([
       loadProject(pid),
       loadSenders(pid),
       loadSignals(pid, isCatchup),
       loadRecentFeedback(pid),
       loadPriorContinuity(pid, briefDate),
       loadPidState(pid),
+      loadAnsweredClarifications(pid),
     ]);
 
     if (!project) { console.log('SKIP (project not found)'); failed++; continue; }
@@ -1410,7 +1489,7 @@ async function main() {
       continue;
     }
 
-    const userPrompt = buildUserPrompt(project, senders, signals, feedback, continuity, pidState, isCatchup, briefDate);
+    const userPrompt = buildUserPrompt(project, senders, signals, feedback, continuity, pidState, answeredClarifications, isCatchup, briefDate);
     const result = await callHaiku(userPrompt);
 
     if (!result) { console.log('FAILED (Haiku error)'); failed++; continue; }
@@ -1439,6 +1518,7 @@ async function main() {
     try {
       await writeToDB(pid, briefDate, finalBrief, result.usage, isCatchup);
       writeMarkdownFiles(project, finalBrief, briefDate, isCatchup);
+      await persistClarifications(pid, briefDate, isCatchup, finalBrief.ai_clarification);
     } catch (err) {
       console.log(`FAILED (write error: ${err instanceof Error ? err.message : err})`);
       failed++;

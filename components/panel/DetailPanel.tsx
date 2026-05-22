@@ -667,6 +667,255 @@ function CrossSourceFlags({ flags }: { flags: BriefJSON['cross_source_flags'] })
   )
 }
 
+// ── Phase / state line (Brief JSON v2) ─────────────────────────────────────
+
+function PhaseLine({ brief }: { brief: BriefJSON }) {
+  if (!brief.phase) return null
+  const phase = brief.phase.replace(/_/g, ' ').toUpperCase()
+  const runway = brief.runway_pct != null ? ` · ${brief.runway_pct}% runway` : ''
+  const recovery = brief.recovery_state
+    ? brief.recovery_state.sustained_positive
+      ? ' · post-recovery (sustained)'
+      : ' · POST-RECOVERY · heightened monitoring'
+    : ''
+  const badge = brief.exceptional_pid_score?.badge ? ' · ★ EXCEPTIONAL' : ''
+  const recoveryColor = brief.recovery_state && !brief.recovery_state.sustained_positive
+    ? 'var(--critical)'
+    : 'var(--text-dim)'
+  return (
+    <div style={{ fontSize: 11, color: recoveryColor, fontFamily: 'var(--font-mono)', letterSpacing: 0.5 }}>
+      {phase}{runway}{recovery}{badge}
+    </div>
+  )
+}
+
+// ── Client Experience Frame ────────────────────────────────────────────────
+
+function ClientExperienceFrame({ frame }: { frame?: string }) {
+  if (!frame) return null
+  return (
+    <div style={{
+      fontSize: 12,
+      color: 'var(--text-primary)',
+      lineHeight: 1.6,
+      padding: '10px 12px',
+      background: 'var(--surface-elevated)',
+      borderLeft: '3px solid var(--accent)',
+      borderRadius: 4,
+    }}>
+      <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', marginBottom: 4, letterSpacing: 0.5 }}>
+        Client Experience
+      </div>
+      {frame}
+    </div>
+  )
+}
+
+// ── Amaan's Open Asks (24h+ unanswered) ────────────────────────────────────
+
+function AmaanSelfLoop({ items }: { items: BriefJSON['amaan_self_loop'] }) {
+  if (!items || items.length === 0) {
+    return <div style={{ fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic' }}>All your asks have responses.</div>
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {items.map((s, i) => (
+        <div key={i} style={{ padding: '8px 10px', background: 'var(--surface-elevated)', borderRadius: 4 }}>
+          <div style={{ fontSize: 11, color: 'var(--text-primary)', marginBottom: 4 }}>
+            &ldquo;{s.original_ask}&rdquo;
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 6 }}>
+            Asked {s.hours_unanswered}h ago, no substantive response
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-primary)', fontStyle: 'italic', borderTop: '1px solid var(--border-subtle)', paddingTop: 6 }}>
+            Re-ping draft: {s.suggested_reping}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── Role Lanes ─────────────────────────────────────────────────────────────
+
+function RoleLanes({ brief }: { brief: BriefJSON }) {
+  const d = brief.designer_lane
+  const p = brief.pm_lane
+  const v = brief.vm_lane
+  if (!d && !p && !v) return null
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {d && (
+        <div style={{ fontSize: 11, color: 'var(--text-primary)' }}>
+          <strong style={{ color: 'var(--text-dim)' }}>Designer:</strong> {d.assigned_designer ?? '(unassigned)'}
+          {d.days_since_intro_call != null ? ` · ${d.days_since_intro_call}d since intro` : ''}
+          {' · '}{d.design_surface_count} design messages
+          {d.flag && <span style={{ color: 'var(--critical)' }}> · ⚠ {d.flag}</span>}
+        </div>
+      )}
+      {p && (
+        <div style={{ fontSize: 11, color: 'var(--text-primary)' }}>
+          <strong style={{ color: 'var(--text-dim)' }}>PM:</strong> {p.assigned_pm ?? '(unassigned)'}
+          {' · '}{p.phase_role}-phase
+          {' · '}{p.client_group_messages_30d} client-group msgs (30d)
+          {p.flag && <span style={{ color: 'var(--critical)' }}> · ⚠ {p.flag}</span>}
+        </div>
+      )}
+      {v && (
+        <div style={{ fontSize: 11, color: 'var(--text-primary)' }}>
+          <strong style={{ color: 'var(--text-dim)' }}>VM (Monu):</strong> {v.open_requests.length} request(s) tagged in 30d
+          {v.flag && <span style={{ color: 'var(--critical)' }}> · ⚠ {v.flag}</span>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── AI Clarification ("What I don't know") ─────────────────────────────────
+
+type BriefClarificationRow = {
+  id: string
+  question: string
+  ai_uncertainty_reason: string | null
+  category: 'sentiment' | 'payment' | 'team' | 'vendor' | 'other' | null
+  amaan_answer: string | null
+  answered_at: string | null
+  brief_date: string
+}
+
+const CATEGORY_COLOR: Record<string, string> = {
+  sentiment: 'var(--critical)',
+  payment: 'var(--attention)',
+  team: 'var(--accent)',
+  vendor: 'var(--healthy)',
+  other: 'var(--text-dim)',
+}
+
+function AIClarification({ pid }: { pid: number }) {
+  const [rows, setRows] = useState<BriefClarificationRow[] | null>(null)
+  const supabase = createClient()
+
+  const load = useCallback(async () => {
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+    const { data } = await supabase
+      .from('brief_clarifications')
+      .select('id, question, ai_uncertainty_reason, category, amaan_answer, answered_at, brief_date')
+      .eq('pid', pid)
+      .gte('brief_date', sevenDaysAgo)
+      .order('brief_date', { ascending: false })
+      .order('created_at', { ascending: false })
+    setRows((data ?? []) as BriefClarificationRow[])
+  }, [pid, supabase])
+
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- standard data-load on mount
+  useEffect(() => { void load() }, [load])
+
+  if (rows === null) {
+    return <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>Loading…</div>
+  }
+  if (rows.length === 0) {
+    return <div style={{ fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic' }}>High confidence on recent briefs — no clarification needed.</div>
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {rows.map((r) => (
+        <ClarificationCard key={r.id} row={r} onSaved={load} />
+      ))}
+    </div>
+  )
+}
+
+function ClarificationCard({ row, onSaved }: { row: BriefClarificationRow; onSaved: () => void }) {
+  const [answer, setAnswer] = useState(row.amaan_answer ?? '')
+  const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+
+  const isAnswered = Boolean(row.amaan_answer)
+  const catColor = CATEGORY_COLOR[row.category ?? 'other']
+
+  async function save() {
+    if (!answer.trim()) return
+    setState('saving')
+    try {
+      const res = await fetch('/api/clarification-answer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clarification_id: row.id, amaan_answer: answer }),
+      })
+      if (!res.ok) throw new Error('Save failed')
+      setState('saved')
+      setTimeout(() => { setState('idle'); onSaved() }, 800)
+    } catch {
+      setState('error')
+    }
+  }
+
+  return (
+    <div style={{
+      padding: '10px 12px',
+      background: 'var(--surface-elevated)',
+      borderRadius: 4,
+      borderLeft: `3px solid ${catColor}`,
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 }}>
+        <span style={{
+          fontSize: 9, fontWeight: 700, color: catColor, textTransform: 'uppercase', letterSpacing: 0.5,
+        }}>
+          {row.category ?? 'other'}
+        </span>
+        <span style={{ fontSize: 9, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
+          {row.brief_date}
+        </span>
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--text-primary)', lineHeight: 1.5, marginBottom: 4 }}>
+        {row.question}
+      </div>
+      {row.ai_uncertainty_reason && (
+        <div style={{ fontSize: 10, color: 'var(--text-dim)', fontStyle: 'italic', marginBottom: 8 }}>
+          Reason: {row.ai_uncertainty_reason}
+        </div>
+      )}
+      {isAnswered ? (
+        <div style={{
+          fontSize: 11, color: 'var(--text-primary)', padding: '6px 8px',
+          background: 'var(--surface)', borderRadius: 3, borderLeft: '2px solid var(--healthy)',
+        }}>
+          <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--healthy)', textTransform: 'uppercase', letterSpacing: 0.5, marginRight: 6 }}>
+            Your answer
+          </span>
+          {row.amaan_answer}
+        </div>
+      ) : (
+        <div style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+          <textarea
+            value={answer}
+            onChange={(e) => setAnswer(e.target.value)}
+            placeholder="Your answer (persists as future-brief context)"
+            rows={2}
+            style={{
+              flex: 1, fontSize: 11, padding: '6px 8px', borderRadius: 3,
+              border: '1px solid var(--border-default)', background: 'var(--surface)',
+              color: 'var(--text-primary)', fontFamily: 'inherit', resize: 'vertical',
+            }}
+          />
+          <button
+            onClick={save}
+            disabled={!answer.trim() || state === 'saving'}
+            style={{
+              fontSize: 10, padding: '6px 10px', borderRadius: 3,
+              background: state === 'saved' ? 'var(--healthy)' : 'var(--accent)',
+              color: 'white', border: 'none', cursor: answer.trim() ? 'pointer' : 'not-allowed',
+              opacity: answer.trim() ? 1 : 0.5, fontWeight: 600,
+            }}
+          >
+            {state === 'saving' ? 'Saving…' : state === 'saved' ? 'Saved ✓' : state === 'error' ? 'Retry' : 'Save'}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Feedback ───────────────────────────────────────────────────────────────
 
 const FEEDBACK_TAGS = ['whole brief', 'client pulse', 'team status', 'send to group', 'commitments', 'needs you', 'cross-source flags', 'other']
@@ -969,6 +1218,20 @@ export function DetailPanel() {
                         <BriefFreshnessBar date={brief.date} isCatchup={brief.isCatchup} />
                       </div>
 
+                      {/* B0.5 Phase + state line (Brief JSON v2) */}
+                      {b.phase && (
+                        <div style={{ padding: '0 20px' }}>
+                          <PhaseLine brief={b} />
+                        </div>
+                      )}
+
+                      {/* B0.7 Client Experience Frame (drives intra-day triage) */}
+                      {b.client_experience_frame && (
+                        <PanelSection id="section-client-experience">
+                          <ClientExperienceFrame frame={b.client_experience_frame} />
+                        </PanelSection>
+                      )}
+
                       {/* B1 Client Pulse */}
                       <PanelSection id="section-client-pulse">
                         <SectionTitle>Client Pulse</SectionTitle>
@@ -1054,6 +1317,28 @@ export function DetailPanel() {
                       <PanelSection id="section-flags">
                         <SectionTitle>Cross-Source Flags</SectionTitle>
                         <CrossSourceFlags flags={b.cross_source_flags} />
+                      </PanelSection>
+
+                      {/* V2.1 Amaan's Open Asks (24h+ unanswered) */}
+                      {b.amaan_self_loop && b.amaan_self_loop.length > 0 && (
+                        <PanelSection id="section-self-loop">
+                          <SectionTitle count={b.amaan_self_loop.length}>Still Waiting On (Your Asks)</SectionTitle>
+                          <AmaanSelfLoop items={b.amaan_self_loop} />
+                        </PanelSection>
+                      )}
+
+                      {/* V2.2 Role Lanes (Designer + PM + VM) */}
+                      {(b.designer_lane || b.pm_lane || b.vm_lane) && (
+                        <PanelSection id="section-lanes">
+                          <SectionTitle>Role Lanes</SectionTitle>
+                          <RoleLanes brief={b} />
+                        </PanelSection>
+                      )}
+
+                      {/* V2.3 AI Clarification (Step 7) */}
+                      <PanelSection id="section-clarification">
+                        <SectionTitle>What I Don&apos;t Know</SectionTitle>
+                        <AIClarification pid={project.pid} />
                       </PanelSection>
 
                       {/* D10 Portfolio Mentions */}

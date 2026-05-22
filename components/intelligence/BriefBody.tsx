@@ -31,6 +31,71 @@ export interface BriefJSON {
   }>
   open_questions: { clarification_message: string } | Array<{ question: string; draft_message: string }>
   cross_source_flags: Array<{ flag: string; chat_says: string; tracker_says: string }>
+
+  // Brief JSON v2 fields — all optional for backward compatibility with older
+  // briefs persisted before the schema upgrade.
+  phase?:
+    | 'sales_wip' | 'onboarding' | 'active_planning' | 'mid_runway'
+    | 'final_quarter' | 'post_event' | 'paused' | 'cancelled'
+  runway_pct?: number | null
+  client_experience_frame?: string
+  ai_clarification?: Array<{
+    question: string
+    reason: string
+    category: 'sentiment' | 'payment' | 'team' | 'vendor' | 'other'
+  }>
+  amaan_self_loop?: Array<{
+    original_ask: string
+    asked_at: string
+    hours_unanswered: number
+    suggested_reping: string
+  }>
+  recovery_state?: null | {
+    entered_at: string
+    sustained_positive: boolean
+    last_positive_marker_at: string | null
+  }
+  designer_lane?: {
+    assigned_designer: string | null
+    days_since_intro_call: number | null
+    design_surface_count: number
+    flag: string | null
+  }
+  pm_lane?: {
+    assigned_pm: string | null
+    phase_role: 'early' | 'late' | 'na'
+    client_group_messages_30d: number
+    meet_voice_count_30d: number
+    flag: string | null
+  }
+  vm_lane?: {
+    open_requests: Array<{
+      tagged_at: string
+      topic: string
+      has_deadline: boolean
+      status_updates: number
+    }>
+    flag: string | null
+  }
+  commercial_trail?: Array<{
+    vendor_name: string
+    locked: boolean
+    cp_present: boolean
+    sp_present: boolean
+    advance_present: boolean
+    margin_present: boolean
+    schedule_present: boolean
+    completeness_pct: number
+  }>
+  phase_expectations?: {
+    expected_at_runway_pct: Array<{ item: string; expected: boolean; actual: boolean }>
+  }
+  exceptional_pid_score?: {
+    proactive_surface: number
+    client_mirroring: number
+    collaborative_framing: number
+    badge: boolean
+  }
 }
 
 const SENTIMENT_COLOR: Record<string, string> = {
