@@ -620,6 +620,44 @@ async function writeToDB(
 
 // --- Markdown render ---
 
+// Known team roster — matches people/<Name>.md note names exactly in the vault.
+// Wikilinking these in brief markdown is what creates the people <-> PID graph cluster.
+const VAULT_TEAM_ROSTER = [
+  'Amaan Abdul Kader', 'Bhavika Gurnani', 'Shreyanshu Tiwari', 'Varun Mittal',
+  'Tapasya Waldia', 'Somila Bhadauriya', 'Nikhil Gupta',
+  'Aditya Sharma', 'Jaishree Patel', 'Narendra Singh',
+  'Ananth Santhosh',
+];
+
+function wikilinkTeam(name: string | null): string {
+  if (!name) return '';
+  const trimmed = name.trim();
+  if (VAULT_TEAM_ROSTER.includes(trimmed)) return `[[${trimmed}]]`;
+  // Fuzzy: also wikilink if a full-name match exists after collapsing whitespace
+  const normalized = trimmed.replace(/\s+/g, ' ');
+  if (VAULT_TEAM_ROSTER.includes(normalized)) return `[[${normalized}]]`;
+  return trimmed;
+}
+
+function linkifyTeamInText(text: string): string {
+  let result = text;
+  for (const full of VAULT_TEAM_ROSTER) {
+    const escaped = full.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`(?<!\\[\\[)\\b${escaped}\\b(?!\\]\\])`, 'g');
+    result = result.replace(re, `[[${full}]]`);
+  }
+  // Also wikilink first-name + role mentions: "Tapasya (Planner)" -> "[[Tapasya Waldia]] (Planner)"
+  for (const full of VAULT_TEAM_ROSTER) {
+    const first = full.split(' ')[0];
+    const re = new RegExp(
+      `(?<!\\[\\[)\\b${first}\\b(?=\\s*\\((?:planner|designer|project_manager|pm|tl|team_lead|rm)\\))`,
+      'gi',
+    );
+    result = result.replace(re, `[[${full}]]`);
+  }
+  return result;
+}
+
 function renderMarkdown(
   project: ProjectRow,
   brief: BriefJSON,
@@ -654,7 +692,7 @@ function renderMarkdown(
     ``,
     `**Event:** ${project.event_start_date ?? '?'}${project.event_end_date && project.event_end_date !== project.event_start_date ? ' → ' + project.event_end_date : ''} · ${project.venue ?? '?'} · ${daysLabel}`,
     `**Package:** ${rupees(project.package_price_eff)} · Collection ${project.collection_pct ?? '?'}% · Health ${project.project_health ?? '?'}/5 · Cancel risk ${project.cancellation_risk ?? '?'}/5`,
-    `**Team:** ${[project.team_lead, project.planner, project.designer, project.project_manager].filter(Boolean).join(' · ')}`,
+    `**Team:** ${[project.team_lead, project.planner, project.designer, project.project_manager].filter(Boolean).map(wikilinkTeam).join(' · ')}`,
     ``,
     `---`,
     ``,
@@ -720,9 +758,18 @@ function renderMarkdown(
           (f) => `- [FLAG] **${f.flag}** — chat: "${f.chat_says}" · tracker: "${f.tracker_says}"`,
         )
       : ['- None']),
+    ``,
+    `---`,
+    ``,
+    `## Related`,
+    ``,
+    `- PID hub: [[pids/${project.pid}]]`,
+    `- [[00 - Map of Content]]`,
+    `- [[people/00-index]]`,
   ];
 
-  return lines.join('\n');
+  // Linkify any team names that appear in body content (Team Status entries, What Changed, etc.)
+  return linkifyTeamInText(lines.join('\n'));
 }
 
 function writeMarkdownFiles(
