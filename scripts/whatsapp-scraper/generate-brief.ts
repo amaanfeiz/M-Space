@@ -590,6 +590,18 @@ function buildUserPrompt(
 
   // Format signals; if over MAX_CHARS, drop oldest first to keep most recent
   const MAX_CHARS = 90_000;
+  const ROLE_LABEL: Record<string, string> = {
+    team_lead: 'TL',
+    planner: 'Planner',
+    designer: 'Designer',
+    project_manager: 'PM',
+    vendor_manager: 'VM',
+    rm: 'RM',
+    client: 'Client',
+    vendor: 'Vendor',
+    meragi_other: 'Meragi',
+    unknown: '?',
+  };
   const allSignalLines = signals.map((sig) => {
     const senderInfo = sig.sender_name
       ? senders.byName.get(sig.sender_name)
@@ -597,8 +609,9 @@ function buildUserPrompt(
       ? senders.byWaId.get(sig.sender_wa_id)
       : undefined;
     const label = senderInfo?.display_label ?? sig.sender_name ?? sig.sender_wa_id ?? 'Unknown';
-    const groupTag = sig.chat_type === 'client' ? '[client]' : '[internal]';
-    return `[${formatDate(sig.sent_at)} ${formatTime(sig.sent_at)}] ${groupTag} ${label}: ${sig.body}`;
+    const roleLabel = senderInfo?.role ? (ROLE_LABEL[senderInfo.role] ?? senderInfo.role) : '?';
+    const groupTag = sig.chat_type === 'client' ? '[CLIENT-GROUP]' : '[INTERNAL]';
+    return `[${formatDate(sig.sent_at)} ${formatTime(sig.sent_at)}] ${groupTag} ${label} (${roleLabel}): ${sig.body}`;
   });
 
   // Iterate from newest (end of array) backwards, prepend; stop when budget exhausted
