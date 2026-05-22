@@ -42,7 +42,20 @@ if (pidArg) {
 }
 
 // --- Types ---
-interface BriefJSON {
+
+// Phase from pid_state. Mirrors the migration 0013 check constraint.
+type PidPhase =
+  | 'sales_wip'
+  | 'onboarding'
+  | 'active_planning'
+  | 'mid_runway'
+  | 'final_quarter'
+  | 'post_event'
+  | 'paused'
+  | 'cancelled';
+
+// What Haiku emits. Constrained by BRIEF_SCHEMA below.
+interface HaikuBriefOutput {
   client_pulse: {
     sentiment: 'positive' | 'neutral' | 'cautious' | 'anxious' | 'cold';
     confidence: 'high' | 'medium' | 'low';
@@ -80,6 +93,75 @@ interface BriefJSON {
     chat_says: string;
     tracker_says: string;
   }>;
+  // New model-emitted fields (Brief JSON v2)
+  client_experience_frame: string;
+  ai_clarification: Array<{
+    question: string;
+    reason: string;
+    category: 'sentiment' | 'payment' | 'team' | 'vendor' | 'other';
+  }>;
+}
+
+// Final persisted brief = Haiku output + deterministic computed fields.
+interface BriefJSON extends HaikuBriefOutput {
+  phase: PidPhase;
+  runway_pct: number | null;
+  recovery_state: null | {
+    entered_at: string;
+    sustained_positive: boolean;
+    last_positive_marker_at: string | null;
+  };
+  amaan_self_loop: Array<{
+    original_ask: string;
+    asked_at: string;
+    hours_unanswered: number;
+    suggested_reping: string;
+  }>;
+  designer_lane: {
+    assigned_designer: string | null;
+    days_since_intro_call: number | null;
+    design_surface_count: number;
+    flag: string | null;
+  };
+  pm_lane: {
+    assigned_pm: string | null;
+    phase_role: 'early' | 'late' | 'na';
+    client_group_messages_30d: number;
+    meet_voice_count_30d: number;
+    flag: string | null;
+  };
+  vm_lane: {
+    open_requests: Array<{
+      tagged_at: string;
+      topic: string;
+      has_deadline: boolean;
+      status_updates: number;
+    }>;
+    flag: string | null;
+  };
+  commercial_trail: Array<{
+    vendor_name: string;
+    locked: boolean;
+    cp_present: boolean;
+    sp_present: boolean;
+    advance_present: boolean;
+    margin_present: boolean;
+    schedule_present: boolean;
+    completeness_pct: number;
+  }>;
+  phase_expectations: {
+    expected_at_runway_pct: Array<{
+      item: string;
+      expected: boolean;
+      actual: boolean;
+    }>;
+  };
+  exceptional_pid_score: {
+    proactive_surface: number;
+    client_mirroring: number;
+    collaborative_framing: number;
+    badge: boolean;
+  };
 }
 
 // --- JSON schema for output_config ---
@@ -173,8 +255,26 @@ const BRIEF_SCHEMA = {
         additionalProperties: false,
       },
     },
+    client_experience_frame: { type: 'string' },
+    ai_clarification: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          question: { type: 'string' },
+          reason: { type: 'string' },
+          category: { type: 'string', enum: ['sentiment', 'payment', 'team', 'vendor', 'other'] },
+        },
+        required: ['question', 'reason', 'category'],
+        additionalProperties: false,
+      },
+    },
   },
-  required: ['client_pulse', 'team_status', 'what_changed', 'commitments', 'needs_you', 'unacknowledged_requests', 'open_questions', 'cross_source_flags'],
+  required: [
+    'client_pulse', 'team_status', 'what_changed', 'commitments', 'needs_you',
+    'unacknowledged_requests', 'open_questions', 'cross_source_flags',
+    'client_experience_frame', 'ai_clarification',
+  ],
   additionalProperties: false,
 };
 
@@ -221,6 +321,22 @@ Read the project context (hard facts from the tracker) and WhatsApp chat signals
 17. SOURCE-AWARE FRAMING — when describing a signal, reference its source naturally. "Bhavika asked the client on the client group" vs "Bhavika confirmed the markup internally." Same content + different group = different severity.
 18. CROSS-GROUP CONTEXT CAN DE-FLAG — an internal-group note can re-frame a client-group signal. Example: design slowness on the client group is NOT a slip if the internal group has explained why (designer unwell, returning Monday). Do not flag what has already been explained internally.
 19. NO ESCALATION DRAFTS — never draft founder-bound escalation packets, hard-refusal scripts for the client group, recovery scripts (credentials → apology → reframe → action), or sharper-tone messages. Surface the state and ladder step; let Amaan write the response.
+
+## Required additional fields (Brief JSON v2)
+
+Beyond the existing sections, emit two more fields:
+
+**client_experience_frame** — ONE short sentence (max ~150 chars) describing what the client is currently feeling, waiting on, or annoyed by. This is the intra-day triage anchor. Examples:
+- "Waiting on photographer profiles — chased twice, no response. Feeling unmanaged."
+- "Just confirmed venue, excited and looking forward to first call this week."
+- "Silent 30d since payment ask — engagement risk."
+- "Fully aligned, no active expectation."
+Never empty. If nothing is active, say "No active expectation" or describe the current calm.
+
+**ai_clarification** — 0 to 3 items where you genuinely need TL context or are uncertain. Each: { question, reason, category }. Categories: sentiment | payment | team | vendor | other. Examples:
+- { question: "Is Aditya off this week?", reason: "Zero internal-group activity in 6 days, unusual for him", category: "team" }
+- { question: "Did the client approve the venue or just acknowledge?", reason: "Reply was a one-word 'ok' on a multi-point ask", category: "vendor" }
+Confident bad calls are worse than admitted uncertainty. Empty array is fine when confidence is high.
 
 ## Sentiment scale
 - positive: client is engaged, enthusiastic, actively moving things forward
@@ -340,6 +456,7 @@ function buildSilenceBrief(
   project: ProjectRow,
   lastSignalAt: string | null,
   briefDate: string,
+  pidState: PidState | null,
 ): BriefJSON {
   const today = new Date(briefDate + 'T00:00:00+05:30');
   const lastDate = lastSignalAt ? new Date(lastSignalAt) : null;
@@ -389,9 +506,27 @@ function buildSilenceBrief(
     }],
     unacknowledged_requests: [],
     open_questions: {
-      clarification_message: `Hey @${plannerFirst}, this project has been silent ${daysSilent} days since ${lastDateLabel}. Please confirm status with the couple today and share what is blocking progress. If anything was discussed on call, please ensure there is a text trail.`,
+      clarification_message: `Hey Team, this project has been silent ${daysSilent} days since ${lastDateLabel}. If any of these were discussed on call, please ensure there's a text trail.\n1. ${plannerFirst} — please confirm current status with the couple today and share what's blocking progress.\n2. Internal flag: ${daysSilent}d silence on an active Planning In-Progress PID is a process risk — we need movement visible in the group.`,
     },
     cross_source_flags: [],
+    client_experience_frame: `Client silent ${daysSilent}d — no current expectation visible. Project quietness is itself the signal.`,
+    ai_clarification: [
+      {
+        question: `Is ${plannerFirst} working off-channel with the client?`,
+        reason: `${daysSilent}d of group silence on a Planning In-Progress PID is unusual — could be off-group movement we're not seeing.`,
+        category: 'team' as const,
+      },
+    ],
+    phase: pidState?.phase ?? 'active_planning',
+    runway_pct: pidState?.runway_pct ?? null,
+    recovery_state: null,
+    amaan_self_loop: [],
+    designer_lane: { ...EMPTY_DESIGNER_LANE, assigned_designer: project.designer },
+    pm_lane: { ...EMPTY_PM_LANE, assigned_pm: project.project_manager },
+    vm_lane: EMPTY_VM_LANE,
+    commercial_trail: [],
+    phase_expectations: computePhaseExpectations(pidState),
+    exceptional_pid_score: EMPTY_EXCEPTIONAL_SCORE,
   };
 }
 
@@ -494,6 +629,260 @@ async function loadPriorContinuity(pid: number, briefDate: string): Promise<Prio
 
 interface SenderInfo { display_label: string; role: string }
 
+// =====================================================================
+// pid_state loader + deterministic brief field computations (Steps 5/6/9/10)
+// =====================================================================
+
+interface PidState {
+  phase: PidPhase;
+  runway_pct: number | null;
+  planning_started_at: string | null;
+  recovery_entered_at: string | null;
+  recovery_last_positive_marker_at: string | null;
+  recovery_sustained_positive: boolean;
+  heightened_monitoring_until: string | null;
+}
+
+async function loadPidState(pid: number): Promise<PidState | null> {
+  const { data } = await supabase
+    .from('pid_state')
+    .select('phase, runway_pct, planning_started_at, recovery_entered_at, recovery_last_positive_marker_at, recovery_sustained_positive, heightened_monitoring_until')
+    .eq('pid', pid)
+    .maybeSingle<PidState>();
+  return data;
+}
+
+function computeAmaanSelfLoop(signals: SignalRow[]): BriefJSON['amaan_self_loop'] {
+  const tlWaId = process.env.TL_WA_ID;
+  if (!tlWaId) return [];
+
+  const QUESTION_HINT = /\?|\bplease\b|\b(?:status|update|guys|team)\b.*\?|^(?:can|are|is|will|should|when|where|how|what|why)\b/i;
+  const items: BriefJSON['amaan_self_loop'] = [];
+
+  for (const sig of signals) {
+    if (sig.sender_wa_id !== tlWaId) continue;
+    if (sig.chat_type !== 'internal') continue;
+    if (!sig.body) continue;
+    if (!QUESTION_HINT.test(sig.body)) continue;
+
+    const askedAt = new Date(sig.sent_at);
+    const ageHours = (Date.now() - askedAt.getTime()) / (1000 * 60 * 60);
+    if (ageHours < 24 || ageHours > 168) continue;
+
+    const responseEnd = askedAt.getTime() + 24 * 60 * 60 * 1000;
+    const hasResponse = signals.some((r) => {
+      if (!r.body || r.body.length < 30) return false;
+      if (r.sender_wa_id === tlWaId) return false;
+      if (r.chat_type !== 'internal') return false;
+      const rTs = new Date(r.sent_at).getTime();
+      return rTs > askedAt.getTime() && rTs < responseEnd;
+    });
+    if (hasResponse) continue;
+
+    items.push({
+      original_ask: sig.body.slice(0, 200),
+      asked_at: sig.sent_at,
+      hours_unanswered: Math.round(ageHours),
+      suggested_reping: `Guys, still waiting on a response to: "${sig.body.slice(0, 80).trim()}"`,
+    });
+  }
+
+  const seen = new Set<string>();
+  return items.filter((i) => {
+    const key = i.original_ask.slice(0, 50).toLowerCase().trim();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 5);
+}
+
+const DESIGN_VOCAB = /\b(?:moodboard|decor|theme|design|monogram|save[\s-]the[\s-]date|invite|stationery|printable|brief|colou?r\s+palette)\b/i;
+
+function senderRole(
+  s: SignalRow,
+  senders: { byName: Map<string, SenderInfo>; byWaId: Map<string, SenderInfo> },
+): string | null {
+  const info = s.sender_name
+    ? senders.byName.get(s.sender_name)
+    : s.sender_wa_id
+    ? senders.byWaId.get(s.sender_wa_id)
+    : undefined;
+  return info?.role ?? null;
+}
+
+function computeDesignerLane(
+  project: ProjectRow,
+  signals: SignalRow[],
+  senders: { byName: Map<string, SenderInfo>; byWaId: Map<string, SenderInfo> },
+): BriefJSON['designer_lane'] {
+  const designer = project.designer;
+  const firstClient = signals.find((s) => s.chat_type === 'client');
+  const daysSinceIntro = firstClient
+    ? Math.floor((Date.now() - new Date(firstClient.sent_at).getTime()) / (1000 * 60 * 60 * 24))
+    : null;
+
+  const designSurfaceCount = signals.filter((s) => {
+    if (s.chat_type !== 'client') return false;
+    if (senderRole(s, senders) !== 'designer') return false;
+    return s.body !== null && DESIGN_VOCAB.test(s.body);
+  }).length;
+
+  let flag: string | null = null;
+  if (!designer) flag = 'No designer assigned';
+  else if (daysSinceIntro !== null && daysSinceIntro >= 28 && designSurfaceCount === 0) {
+    flag = `${designer} silent on design surface ${daysSinceIntro}d after intro`;
+  }
+
+  return {
+    assigned_designer: designer,
+    days_since_intro_call: daysSinceIntro,
+    design_surface_count: designSurfaceCount,
+    flag,
+  };
+}
+
+function computePmLane(
+  project: ProjectRow,
+  signals: SignalRow[],
+  senders: { byName: Map<string, SenderInfo>; byWaId: Map<string, SenderInfo> },
+  phase: PidPhase,
+): BriefJSON['pm_lane'] {
+  const pm = project.project_manager;
+  const isLatePhase = phase === 'mid_runway' || phase === 'final_quarter';
+  const phaseRole: 'early' | 'late' | 'na' = pm ? (isLatePhase ? 'late' : 'early') : 'na';
+
+  const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  const pmClientMessages = signals.filter((s) => {
+    if (s.chat_type !== 'client') return false;
+    if (new Date(s.sent_at).getTime() < thirtyDaysAgo) return false;
+    return senderRole(s, senders) === 'project_manager';
+  }).length;
+
+  let flag: string | null = null;
+  if (pm && phaseRole === 'late' && pmClientMessages === 0) {
+    flag = `${pm} silent in client group during ${phase} — late-phase coordination needs visibility`;
+  } else if (pm && phaseRole === 'early' && pmClientMessages === 0) {
+    flag = `${pm} zero client-group messages in 30d (early phase — light surface still expected)`;
+  }
+
+  return {
+    assigned_pm: pm,
+    phase_role: phaseRole,
+    client_group_messages_30d: pmClientMessages,
+    meet_voice_count_30d: 0, // v1: no transcript layer
+    flag,
+  };
+}
+
+const VM_TAG_RE = /\b(?:monu|@VM\b|vendor\s+management|VM\s+team|VM\s+please|VM,)\b/i;
+
+function computeVmLane(signals: SignalRow[]): BriefJSON['vm_lane'] {
+  const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  const tagMessages = signals.filter((s) => {
+    if (s.chat_type !== 'internal') return false;
+    if (new Date(s.sent_at).getTime() < thirtyDaysAgo) return false;
+    return s.body !== null && VM_TAG_RE.test(s.body);
+  });
+
+  const openRequests = tagMessages.slice(-5).map((s) => ({
+    tagged_at: s.sent_at,
+    topic: (s.body ?? '').slice(0, 100),
+    has_deadline: false,
+    status_updates: 0,
+  }));
+
+  const flag = openRequests.length >= 3
+    ? `VM tagged ${openRequests.length} times in 30d — verify response cadence`
+    : null;
+
+  return { open_requests: openRequests, flag };
+}
+
+function computePhaseExpectations(pidState: PidState | null): BriefJSON['phase_expectations'] {
+  if (!pidState || pidState.runway_pct === null) return { expected_at_runway_pct: [] };
+  // From handoff § 12 (Planning Runway Logic)
+  const ALL: Array<{ item: string; threshold: number }> = [
+    { item: 'Photography locked', threshold: 25 },
+    { item: 'Makeup locked', threshold: 25 },
+    { item: 'Collection beyond booking fee', threshold: 25 },
+    { item: 'DJ locked', threshold: 50 },
+    { item: 'MC/Anchor locked', threshold: 50 },
+    { item: 'Decor underway', threshold: 50 },
+    { item: 'Smaller services closing (mehendi/baraat)', threshold: 67 },
+    { item: 'All vendors locked', threshold: 75 },
+    { item: 'License clarity (T-45 to T-60)', threshold: 75 },
+    { item: '50% collection on locked vendors', threshold: 75 },
+    { item: '100% collection plan (T-21)', threshold: 90 },
+  ];
+  const rp = pidState.runway_pct;
+  return {
+    expected_at_runway_pct: ALL
+      .filter((e) => rp >= e.threshold)
+      .map((e) => ({ item: e.item, expected: true, actual: false })),
+  };
+}
+
+const COLLAB_RE = /\b(?:we[’']?ll|together|let[’']?s|us\s+all|our\s+(?:next|approach|plan)|figure\s+(?:this|it)\s+out|work\s+this\s+out|happy\s+to)\b/i;
+
+function computeExceptionalPidScore(
+  signals: SignalRow[],
+  senders: { byName: Map<string, SenderInfo>; byWaId: Map<string, SenderInfo> },
+): BriefJSON['exceptional_pid_score'] {
+  const plannerClientMsgs = signals.filter((s) => s.chat_type === 'client' && senderRole(s, senders) === 'planner');
+  const clientMsgs = signals.filter((s) => s.chat_type === 'client' && senderRole(s, senders) === 'client');
+  const teamMsgs = signals.filter((s) => {
+    const r = senderRole(s, senders);
+    return r === 'planner' || r === 'designer' || r === 'project_manager' || r === 'team_lead';
+  });
+
+  const proactiveCount = plannerClientMsgs.filter((s) => (s.body?.length ?? 0) > 50).length;
+  const proactiveScore = plannerClientMsgs.length > 0 ? Math.min(1, proactiveCount / plannerClientMsgs.length) : 0;
+
+  const avgLen = (msgs: SignalRow[]) =>
+    msgs.length > 0 ? msgs.reduce((sum, m) => sum + (m.body?.length ?? 0), 0) / msgs.length : 0;
+  const avgClient = avgLen(clientMsgs);
+  const avgPlanner = avgLen(plannerClientMsgs);
+  const mirroringScore = avgClient > 0 && avgPlanner > 0
+    ? Math.max(0, 1 - Math.abs(avgClient - avgPlanner) / Math.max(avgClient, avgPlanner))
+    : 0;
+
+  const collabCount = teamMsgs.filter((s) => s.body !== null && COLLAB_RE.test(s.body)).length;
+  const denominator = Math.max(10, teamMsgs.length * 0.2);
+  const collaborativeScore = teamMsgs.length > 0 ? Math.min(1, collabCount / denominator) : 0;
+
+  const total = proactiveScore + mirroringScore + collaborativeScore;
+  return {
+    proactive_surface: Math.round(proactiveScore * 100) / 100,
+    client_mirroring: Math.round(mirroringScore * 100) / 100,
+    collaborative_framing: Math.round(collaborativeScore * 100) / 100,
+    badge: total > 2.0,
+  };
+}
+
+const EMPTY_DESIGNER_LANE: BriefJSON['designer_lane'] = {
+  assigned_designer: null,
+  days_since_intro_call: null,
+  design_surface_count: 0,
+  flag: null,
+};
+const EMPTY_PM_LANE: BriefJSON['pm_lane'] = {
+  assigned_pm: null,
+  phase_role: 'na',
+  client_group_messages_30d: 0,
+  meet_voice_count_30d: 0,
+  flag: null,
+};
+const EMPTY_VM_LANE: BriefJSON['vm_lane'] = {
+  open_requests: [],
+  flag: null,
+};
+const EMPTY_EXCEPTIONAL_SCORE: BriefJSON['exceptional_pid_score'] = {
+  proactive_surface: 0,
+  client_mirroring: 0,
+  collaborative_framing: 0,
+  badge: false,
+};
+
 async function loadSenders(pid: number): Promise<{
   byName: Map<string, SenderInfo>;
   byWaId: Map<string, SenderInfo>;
@@ -557,6 +946,7 @@ function buildUserPrompt(
   signals: SignalRow[],
   feedback: FeedbackRow[],
   continuity: PriorContinuity,
+  pidState: PidState | null,
   catchup: boolean,
   briefDate: string,
 ): string {
@@ -640,6 +1030,9 @@ TRACKER: Collection: ${collectionLine}
 TRACKER: Health: ${project.project_health ?? '?'}/5 · Cancel Risk: ${project.cancellation_risk ?? '?'}/5
 TRACKER: Roster: ${roster}
 TRACKER: Sentiment (tracker): ${project.sentiment ?? '—'}
+STATE: phase=${pidState?.phase ?? 'unknown'} · runway=${pidState?.runway_pct != null ? pidState.runway_pct + '%' : '?%'} · recovery=${pidState?.recovery_entered_at ? 'YES (entered ' + pidState.recovery_entered_at.slice(0, 10) + ' · ' + (pidState.recovery_sustained_positive ? 'sustained-positive' : 'heightened-monitoring') + ')' : 'no'}
+
+Reason about expectations through this lens — a first-quarter PID without DJ locked is normal; a final-quarter PID without DJ locked is critical.
 
 === KNOWN SENDERS (from resolved roster) ===
 ${[...senders.byName.values(), ...senders.byWaId.values()].map((s) => `${s.display_label} (${s.role})`).join(', ') || 'none resolved'}
@@ -680,7 +1073,7 @@ Generate the JSON brief for PID ${project.pid} (${project.cx_name ?? '?'}).`;
 
 // --- Haiku call ---
 
-async function callHaiku(userPrompt: string): Promise<{ brief: BriefJSON; usage: { input_tokens: number; output_tokens: number } } | null> {
+async function callHaiku(userPrompt: string): Promise<{ brief: HaikuBriefOutput; usage: { input_tokens: number; output_tokens: number } } | null> {
   try {
     const response = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
@@ -709,7 +1102,7 @@ async function callHaiku(userPrompt: string): Promise<{ brief: BriefJSON; usage:
       .replace(/^```(?:json)?\s*/i, '')
       .replace(/\s*```$/, '');
 
-    const brief = JSON.parse(text) as BriefJSON;
+    const brief = JSON.parse(text) as HaikuBriefOutput;
     return {
       brief,
       usage: {
@@ -819,9 +1212,15 @@ function renderMarkdown(
     ``,
     `# ${project.cx_name ?? `PID ${project.pid}`} — ${briefDate}${catchup ? ' (catch-up)' : ''}`,
     ``,
+    `**Phase:** ${brief.phase.replace(/_/g, ' ').toUpperCase()}${brief.runway_pct != null ? ` · Runway ${brief.runway_pct}%` : ''}${brief.exceptional_pid_score.badge ? ' · ⭐ EXCEPTIONAL' : ''}${brief.recovery_state ? ` · POST-RECOVERY (${brief.recovery_state.sustained_positive ? 'sustained' : 'heightened-monitoring'})` : ''}`,
     `**Event:** ${project.event_start_date ?? '?'}${project.event_end_date && project.event_end_date !== project.event_start_date ? ' → ' + project.event_end_date : ''} · ${project.venue ?? '?'} · ${daysLabel}`,
     `**Package:** ${rupees(project.package_price_eff)} · Collection ${project.collection_pct ?? '?'}% · Health ${project.project_health ?? '?'}/5 · Cancel risk ${project.cancellation_risk ?? '?'}/5`,
     `**Team:** ${[project.team_lead, project.planner, project.designer, project.project_manager].filter(Boolean).map(wikilinkTeam).join(' · ')}`,
+    ``,
+    `---`,
+    ``,
+    `## Client Experience`,
+    `> ${brief.client_experience_frame || 'No active expectation.'}`,
     ``,
     `---`,
     ``,
@@ -890,6 +1289,45 @@ function renderMarkdown(
     ``,
     `---`,
     ``,
+    `## Amaan's Open Asks (24h+ unanswered)`,
+    ...(brief.amaan_self_loop.length
+      ? brief.amaan_self_loop.flatMap((s) => [
+          `- "${s.original_ask}" — asked ${s.hours_unanswered}h ago`,
+          `  - Soft re-ping: > ${s.suggested_reping}`,
+        ])
+      : ['- None — all your asks have responses']),
+    ``,
+    `---`,
+    ``,
+    `## Role Lanes`,
+    ``,
+    `**Designer:** ${brief.designer_lane.assigned_designer ? wikilinkTeam(brief.designer_lane.assigned_designer) : '(unassigned)'}${brief.designer_lane.days_since_intro_call != null ? ` · ${brief.designer_lane.days_since_intro_call}d since intro` : ''} · ${brief.designer_lane.design_surface_count} design messages${brief.designer_lane.flag ? ` · ⚠ ${brief.designer_lane.flag}` : ''}`,
+    ``,
+    `**PM:** ${brief.pm_lane.assigned_pm ? wikilinkTeam(brief.pm_lane.assigned_pm) : '(unassigned)'} · ${brief.pm_lane.phase_role}-phase · ${brief.pm_lane.client_group_messages_30d} client-group msgs (30d)${brief.pm_lane.flag ? ` · ⚠ ${brief.pm_lane.flag}` : ''}`,
+    ``,
+    `**VM (Monu):** ${brief.vm_lane.open_requests.length} request(s) tagged in 30d${brief.vm_lane.flag ? ` · ⚠ ${brief.vm_lane.flag}` : ''}`,
+    ``,
+    `---`,
+    ``,
+    `## AI Clarification (things I'm not sure about)`,
+    ...(brief.ai_clarification.length
+      ? brief.ai_clarification.flatMap((c) => [
+          `- **${c.category.toUpperCase()}** — ${c.question}`,
+          `  - Reason: ${c.reason}`,
+        ])
+      : ['- High confidence on this brief — no clarification needed.']),
+    ``,
+    `---`,
+    ``,
+    `## Phase Expectations (at ${brief.runway_pct ?? '?'}% runway)`,
+    ...(brief.phase_expectations.expected_at_runway_pct.length
+      ? brief.phase_expectations.expected_at_runway_pct.map(
+          (e) => `- ${e.item} — expected (verification via master sheet pending)`,
+        )
+      : ['- Too early in runway for big-ticket expectations.']),
+    ``,
+    `---`,
+    ``,
     `## Related`,
     ``,
     `- PID hub: [[pids/${project.pid}]]`,
@@ -937,12 +1375,13 @@ async function main() {
   for (const pid of targetPids) {
     process.stdout.write(`PID ${pid}... `);
 
-    const [project, senders, signals, feedback, continuity] = await Promise.all([
+    const [project, senders, signals, feedback, continuity, pidState] = await Promise.all([
       loadProject(pid),
       loadSenders(pid),
       loadSignals(pid, isCatchup),
       loadRecentFeedback(pid),
       loadPriorContinuity(pid, briefDate),
+      loadPidState(pid),
     ]);
 
     if (!project) { console.log('SKIP (project not found)'); failed++; continue; }
@@ -957,7 +1396,7 @@ async function main() {
         continue;
       }
       const lastSignalAt = await loadLastSignalDate(pid);
-      const silenceBrief = buildSilenceBrief(project, lastSignalAt, briefDate);
+      const silenceBrief = buildSilenceBrief(project, lastSignalAt, briefDate, pidState);
       try {
         await writeToDB(pid, briefDate, silenceBrief, { input_tokens: 0, output_tokens: 0 }, isCatchup);
         writeMarkdownFiles(project, silenceBrief, briefDate, isCatchup);
@@ -966,19 +1405,40 @@ async function main() {
         failed++;
         continue;
       }
-      console.log(`SILENCE  cold ${silenceBrief.client_pulse.days_silent}d`);
+      console.log(`SILENCE  cold ${silenceBrief.client_pulse.days_silent}d  phase=${silenceBrief.phase}`);
       ok++;
       continue;
     }
 
-    const userPrompt = buildUserPrompt(project, senders, signals, feedback, continuity, isCatchup, briefDate);
+    const userPrompt = buildUserPrompt(project, senders, signals, feedback, continuity, pidState, isCatchup, briefDate);
     const result = await callHaiku(userPrompt);
 
     if (!result) { console.log('FAILED (Haiku error)'); failed++; continue; }
 
+    // Merge Haiku output with deterministic computed fields to form the full Brief JSON v2.
+    const finalBrief: BriefJSON = {
+      ...result.brief,
+      phase: pidState?.phase ?? 'active_planning',
+      runway_pct: pidState?.runway_pct ?? null,
+      recovery_state: pidState?.recovery_entered_at
+        ? {
+            entered_at: pidState.recovery_entered_at,
+            sustained_positive: pidState.recovery_sustained_positive,
+            last_positive_marker_at: pidState.recovery_last_positive_marker_at,
+          }
+        : null,
+      amaan_self_loop: computeAmaanSelfLoop(signals),
+      designer_lane: computeDesignerLane(project, signals, senders),
+      pm_lane: computePmLane(project, signals, senders, pidState?.phase ?? 'active_planning'),
+      vm_lane: computeVmLane(signals),
+      commercial_trail: [],
+      phase_expectations: computePhaseExpectations(pidState),
+      exceptional_pid_score: computeExceptionalPidScore(signals, senders),
+    };
+
     try {
-      await writeToDB(pid, briefDate, result.brief, result.usage, isCatchup);
-      writeMarkdownFiles(project, result.brief, briefDate, isCatchup);
+      await writeToDB(pid, briefDate, finalBrief, result.usage, isCatchup);
+      writeMarkdownFiles(project, finalBrief, briefDate, isCatchup);
     } catch (err) {
       console.log(`FAILED (write error: ${err instanceof Error ? err.message : err})`);
       failed++;
@@ -989,12 +1449,16 @@ async function main() {
     totalOutput += result.usage.output_tokens;
     ok++;
 
-    const sentiment = result.brief.client_pulse.sentiment;
-    const flags = result.brief.cross_source_flags.length;
-    const needs = result.brief.needs_you.length;
+    const sentiment = finalBrief.client_pulse.sentiment;
+    const flags = finalBrief.cross_source_flags.length;
+    const needs = finalBrief.needs_you.length;
+    const selfLoop = finalBrief.amaan_self_loop.length;
+    const clarif = finalBrief.ai_clarification.length;
+    const badge = finalBrief.exceptional_pid_score.badge ? ' [STAR]' : '';
     console.log(
-      `OK  ${sentiment.padEnd(8)} ${result.usage.input_tokens}in/${result.usage.output_tokens}out` +
-      `${flags ? `  flags: ${flags}` : ''}${needs ? `  actions: ${needs}` : ''}`,
+      `OK  ${sentiment.padEnd(8)} phase=${finalBrief.phase.padEnd(15)} ${result.usage.input_tokens}in/${result.usage.output_tokens}out` +
+      `${flags ? `  flags: ${flags}` : ''}${needs ? `  actions: ${needs}` : ''}` +
+      `${selfLoop ? `  self-loop: ${selfLoop}` : ''}${clarif ? `  ??: ${clarif}` : ''}${badge}`,
     );
   }
 
