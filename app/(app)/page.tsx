@@ -71,7 +71,7 @@ export default async function DashboardPage() {
   ] = await Promise.all([
     supabase.from('projects')
       .select(
-        'pid, cx_name, status, communication_days, overall_pid_risk, cancellation_risk, current_summary, bgmv, collection, collection_pct, event_start_date, planner, project_health, venue, state, last_message_date, synced_at',
+        'pid, cx_name, status, communication_days, overall_pid_risk, cancellation_risk, current_summary, bgmv, collection, collection_pct, event_start_date, planner, project_health, venue, state, last_message_date, synced_at, t_days',
       )
       .in('pid', pidList),
     supabase
@@ -174,9 +174,12 @@ export default async function DashboardPage() {
   const avgCollectionPct = totalContracted > 0 ? Math.round((totalCollected / totalContracted) * 100) : 0
 
   // ── Top of Mind: per-PID grouping
+  // Exclude post-event PIDs (handoff SOP-34: post-event excluded from "important")
   const urgentByPid: UrgentPid[] = []
   for (const [pid, { brief }] of briefByPid) {
     const project = projects.find((p) => p.pid === pid)
+    if (project?.status === 'Concluded' || project?.status === 'Cancelled') continue
+    if ((project?.t_days ?? 0) < -7) continue
     const items: UrgentPid['items'] = []
     for (const r of brief.unacknowledged_requests ?? []) {
       items.push({ kind: 'unanswered', text: r.request, meta: `unanswered ${r.days_unanswered}d` })

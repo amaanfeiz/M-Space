@@ -15,6 +15,7 @@ export type Project = {
   state: string | null
   last_message_date: string | null
   synced_at: string | null
+  t_days: number | null
 }
 
 export type RiskLevel = 'Critical' | 'Attention' | 'Healthy'
