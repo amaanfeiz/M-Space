@@ -998,6 +998,9 @@ export function DetailPanel() {
   const [project, setProject] = useState<DBProject | null>(null)
   const [brief, setBrief] = useState<BriefMeta | null>(null)
   const [briefLoading, setBriefLoading] = useState(false)
+  const [briefDates, setBriefDates] = useState<string[]>([])
+  const [briefDateIdx, setBriefDateIdx] = useState(0)
+  const [refreshing, setRefreshing] = useState(false)
   const [sparklineDays, setSparklineDays] = useState<SparklineDay[]>([])
   const [recentMessages, setRecentMessages] = useState<RecentMessage[]>([])
   const [allSignals, setAllSignals] = useState<Array<{ sent_at: string; chat_type: string }>>([])
@@ -1035,7 +1038,7 @@ export function DetailPanel() {
   // Fetch brief + sparkline data + recent messages + portfolio mentions
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (!openPid) { setBrief(null); setSparklineDays([]); setRecentMessages([]); setAllSignals([]); setPortfolioEntries([]); return }
+    if (!openPid) { setBrief(null); setSparklineDays([]); setRecentMessages([]); setAllSignals([]); setPortfolioEntries([]); setBriefDates([]); setBriefDateIdx(0); return }
     setBriefLoading(true)
     const supabase = createClient()
     const pid = parseInt(openPid)
@@ -1091,6 +1094,13 @@ export function DetailPanel() {
 
       setBriefLoading(false)
     })
+
+    // Fetch all available brief dates for history navigation
+    supabase.from('briefs').select('brief_date, is_catchup').eq('pid', pid).order('brief_date', { ascending: false }).then(({ data: dates }) => {
+      const allDates = (dates ?? []).map(d => d.brief_date as string)
+      setBriefDates(allDates)
+      setBriefDateIdx(0)
+    })
   }, [openPid])
 
   // Panel open/close DOM effects
@@ -1142,6 +1152,49 @@ export function DetailPanel() {
   }, [])
 
   const isLoading = openPid !== null && (project === null || String(project.pid) !== openPid)
+
+  const navigateBrief = useCallback((direction: -1 | 1) => {
+    const newIdx = briefDateIdx + direction
+    if (newIdx < 0 || newIdx >= briefDates.length || !openPid) return
+    setBriefDateIdx(newIdx)
+    setBriefLoading(true)
+    const supabase = createClient()
+    const targetDate = briefDates[newIdx]
+    supabase.from('briefs').select('id, brief_json, brief_date, is_catchup')
+      .eq('pid', parseInt(openPid))
+      .eq('brief_date', targetDate)
+      .order('is_catchup', { ascending: true })
+      .limit(1)
+      .single()
+      .then(({ data }) => {
+        if (data) {
+          setBrief({ id: data.id as string, json: data.brief_json as BriefJSON, date: data.brief_date, isCatchup: data.is_catchup })
+        }
+        setBriefLoading(false)
+      })
+  }, [briefDateIdx, briefDates, openPid])
+
+  const refreshBrief = useCallback(async () => {
+    if (!openPid || refreshing) return
+    if (!confirm('Refresh brief for this PID? This calls Haiku (~₹2).')) return
+    setRefreshing(true)
+    try {
+      const res = await fetch('/api/refresh-brief', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pid: parseInt(openPid) }),
+      })
+      if (!res.ok) throw new Error(await res.text())
+      const data = await res.json()
+      if (data.brief) {
+        setBrief({ id: data.id ?? '', json: data.brief as BriefJSON, date: data.brief_date, isCatchup: false })
+      }
+    } catch (err) {
+      alert(`Refresh failed: ${err instanceof Error ? err.message : err}`)
+    } finally {
+      setRefreshing(false)
+    }
+  }, [openPid, refreshing])
 
   // Derived values for rendering
   const b = brief?.json
@@ -1222,9 +1275,28 @@ export function DetailPanel() {
 
                   {!briefLoading && b && brief && (
                     <>
-                      {/* B0 Freshness */}
-                      <div style={{ padding: '6px 20px 0' }}>
+                      {/* B0 Freshness + history nav */}
+                      <div style={{ padding: '6px 20px 0', display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <button
+                          type="button"
+                          disabled={briefDateIdx >= briefDates.length - 1}
+                          onClick={() => navigateBrief(1)}
+                          style={{ background: 'none', border: 'none', cursor: briefDateIdx >= briefDates.length - 1 ? 'default' : 'pointer', opacity: briefDateIdx >= briefDates.length - 1 ? 0.25 : 0.7, fontSize: 14, color: 'var(--text-muted)', padding: 0 }}
+                        >&lt;</button>
                         <BriefFreshnessBar date={brief.date} isCatchup={brief.isCatchup} />
+                        <button
+                          type="button"
+                          disabled={briefDateIdx <= 0}
+                          onClick={() => navigateBrief(-1)}
+                          style={{ background: 'none', border: 'none', cursor: briefDateIdx <= 0 ? 'default' : 'pointer', opacity: briefDateIdx <= 0 ? 0.25 : 0.7, fontSize: 14, color: 'var(--text-muted)', padding: 0 }}
+                        >&gt;</button>
+                        <button
+                          type="button"
+                          disabled={refreshing}
+                          onClick={refreshBrief}
+                          title="Refresh brief (~₹2)"
+                          style={{ background: 'none', border: '1px solid var(--border-default)', borderRadius: 4, cursor: refreshing ? 'wait' : 'pointer', fontSize: 10, color: 'var(--text-dim)', padding: '2px 6px', marginLeft: 'auto' }}
+                        >{refreshing ? '...' : '↻'}</button>
                       </div>
 
                       {/* B0.5 Phase + state line (Brief JSON v2) */}
@@ -1286,20 +1358,75 @@ export function DetailPanel() {
                         <MoneySection project={project} crossSourceFlags={b.cross_source_flags} />
                       </PanelSection>
 
-                      {/* D6 Vendor Coverage (placeholder) */}
+                      {/* D6 Vendor Coverage */}
                       <PanelSection id="section-vendor">
                         <SectionTitle>Vendor Coverage</SectionTitle>
-                        <div style={{ fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic' }}>
-                          Vendor coverage extraction not yet wired — coming with vendor schema workstream.
-                        </div>
+                        {b.vendor_coverage && b.vendor_coverage.length > 0 ? (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                            {b.vendor_coverage.map((v, i) => {
+                              const statusColor: Record<string, string> = {
+                                confirmed: 'var(--healthy)',
+                                pending: 'var(--attention)',
+                                at_risk: 'var(--critical)',
+                                unknown: 'var(--text-dim)',
+                              }
+                              return (
+                                <div key={i} style={{
+                                  fontSize: 11,
+                                  padding: '4px 8px',
+                                  borderRadius: 6,
+                                  border: `1px solid ${statusColor[v.status] ?? 'var(--border-default)'}`,
+                                  background: 'var(--surface-elevated)',
+                                }}>
+                                  <span style={{ fontWeight: 600, color: statusColor[v.status] }}>{v.vendor_type}</span>
+                                  {v.vendor_name && <span style={{ color: 'var(--text-muted)' }}> ({v.vendor_name})</span>}
+                                  <span style={{ color: 'var(--text-dim)', marginLeft: 4, textTransform: 'uppercase', fontSize: 9 }}>{v.status}</span>
+                                  {v.note && <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>{v.note}</div>}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic' }}>
+                            No vendor discussion in signal window.
+                          </div>
+                        )}
                       </PanelSection>
 
-                      {/* D7 Decision Intel (placeholder) */}
+                      {/* D7 Decision Intel */}
                       <PanelSection id="section-decision">
                         <SectionTitle>Decision Intel</SectionTitle>
-                        <div style={{ fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic' }}>
-                          Decision intel extraction not yet wired — coming with decision schema workstream.
-                        </div>
+                        {b.decision_intel && (b.decision_intel.pending_decisions?.length > 0 || b.decision_intel.recent_decisions?.length > 0) ? (
+                          <div style={{ fontSize: 12 }}>
+                            {b.decision_intel.pending_decisions?.length > 0 && (
+                              <div style={{ marginBottom: 8 }}>
+                                <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', marginBottom: 4 }}>Pending</div>
+                                {b.decision_intel.pending_decisions.map((d, i) => (
+                                  <div key={i} style={{ color: 'var(--text-muted)', marginBottom: 4, paddingLeft: 0 }}>
+                                    {d.blocking && <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--critical)', marginRight: 4 }}>BLOCKING</span>}
+                                    <span style={{ color: 'var(--text-primary)' }}>{d.decision}</span>
+                                    <span style={{ color: 'var(--text-dim)', fontSize: 11 }}> — {d.owner}{d.deadline ? ` · by ${d.deadline}` : ''}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            {b.decision_intel.recent_decisions?.length > 0 && (
+                              <div>
+                                <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', marginBottom: 4 }}>Recent</div>
+                                {b.decision_intel.recent_decisions.map((d, i) => (
+                                  <div key={i} style={{ color: 'var(--text-muted)', marginBottom: 4 }}>
+                                    <span style={{ color: 'var(--text-primary)' }}>{d.decision}</span>
+                                    <span style={{ color: 'var(--text-dim)', fontSize: 11 }}> — {d.decided_by}, {d.decided_on}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: 11, color: 'var(--text-dim)', fontStyle: 'italic' }}>
+                            No decisions in signal window.
+                          </div>
+                        )}
                       </PanelSection>
 
                       {/* B4 Commitments */}

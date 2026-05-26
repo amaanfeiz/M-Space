@@ -62,6 +62,26 @@ export interface BriefJSON {
     sustained_positive: boolean
     last_positive_marker_at: string | null
   }
+  vendor_coverage?: Array<{
+    vendor_type: string
+    vendor_name: string
+    status: 'confirmed' | 'pending' | 'at_risk' | 'unknown'
+    last_mentioned: string
+    note: string
+  }>
+  decision_intel?: {
+    pending_decisions: Array<{
+      decision: string
+      owner: string
+      deadline: string
+      blocking: boolean
+    }>
+    recent_decisions: Array<{
+      decision: string
+      decided_by: string
+      decided_on: string
+    }>
+  }
   designer_lane?: {
     assigned_designer: string | null
     days_since_intro_call: number | null

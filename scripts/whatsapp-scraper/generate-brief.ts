@@ -105,6 +105,26 @@ interface HaikuBriefOutput {
     reason: string;
     category: 'sentiment' | 'payment' | 'team' | 'vendor' | 'other';
   }>;
+  vendor_coverage: Array<{
+    vendor_type: string;
+    vendor_name: string;
+    status: 'confirmed' | 'pending' | 'at_risk' | 'unknown';
+    last_mentioned: string;
+    note: string;
+  }>;
+  decision_intel: {
+    pending_decisions: Array<{
+      decision: string;
+      owner: string;
+      deadline: string;
+      blocking: boolean;
+    }>;
+    recent_decisions: Array<{
+      decision: string;
+      decided_by: string;
+      decided_on: string;
+    }>;
+  };
 }
 
 // Final persisted brief = Haiku output + deterministic computed fields.
@@ -278,11 +298,60 @@ const BRIEF_SCHEMA = {
         additionalProperties: false,
       },
     },
+    vendor_coverage: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          vendor_type: { type: 'string' },
+          vendor_name: { type: 'string' },
+          status: { type: 'string', enum: ['confirmed', 'pending', 'at_risk', 'unknown'] },
+          last_mentioned: { type: 'string' },
+          note: { type: 'string' },
+        },
+        required: ['vendor_type', 'vendor_name', 'status', 'last_mentioned', 'note'],
+        additionalProperties: false,
+      },
+    },
+    decision_intel: {
+      type: 'object',
+      properties: {
+        pending_decisions: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              decision: { type: 'string' },
+              owner: { type: 'string' },
+              deadline: { type: 'string' },
+              blocking: { type: 'boolean' },
+            },
+            required: ['decision', 'owner', 'deadline', 'blocking'],
+            additionalProperties: false,
+          },
+        },
+        recent_decisions: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              decision: { type: 'string' },
+              decided_by: { type: 'string' },
+              decided_on: { type: 'string' },
+            },
+            required: ['decision', 'decided_by', 'decided_on'],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ['pending_decisions', 'recent_decisions'],
+      additionalProperties: false,
+    },
   },
   required: [
     'client_pulse', 'team_status', 'what_changed', 'commitments', 'needs_you',
     'unacknowledged_requests', 'open_questions', 'cross_source_flags',
-    'client_experience_frame', 'ai_clarification',
+    'client_experience_frame', 'ai_clarification', 'vendor_coverage', 'decision_intel',
   ],
   additionalProperties: false,
 };
@@ -341,6 +410,10 @@ Beyond the existing sections, emit two more fields:
 - "Silent 30d since payment ask — engagement risk."
 - "Fully aligned, no active expectation."
 Never empty. If nothing is active, say "No active expectation" or describe the current calm.
+
+**vendor_coverage** — array of vendor mentions extracted from chat. For each vendor discussed in the signal window: vendor_type (photographer, decorator, caterer, florist, venue, DJ, pandit, choreographer, makeup_artist, lighting, videographer, entertainment, other), vendor_name (name if mentioned, "" if unnamed), status (confirmed = locked in, pending = discussed but not confirmed, at_risk = issues/delays, unknown = just mentioned), last_mentioned (DD MMM), note (one-line context). Only include vendors actually discussed in signals. Empty array if no vendor conversation in window.
+
+**decision_intel** — { pending_decisions, recent_decisions }. pending_decisions: things that need a decision but haven't been made yet (deadline = DD MMM or "", blocking = true if other work is waiting on this). recent_decisions: decisions made in the signal window (decided_by = display label, decided_on = DD MMM). Only include clear decisions, not vague preferences. Both arrays can be empty.
 
 **ai_clarification** — 0 to 3 items where you genuinely need TL context or are uncertain. Each: { question, reason, category }. Categories: sentiment | payment | team | vendor | other. Examples:
 - { question: "Is Aditya off this week?", reason: "Zero internal-group activity in 6 days, unusual for him", category: "team" }
@@ -542,6 +615,8 @@ function buildSilenceBrief(
     pm_lane: { ...EMPTY_PM_LANE, assigned_pm: project.project_manager },
     vm_lane: EMPTY_VM_LANE,
     commercial_trail: [],
+    vendor_coverage: [],
+    decision_intel: { pending_decisions: [], recent_decisions: [] },
     phase_expectations: computePhaseExpectations(pidState),
     exceptional_pid_score: EMPTY_EXCEPTIONAL_SCORE,
   };
@@ -1387,6 +1462,29 @@ function renderMarkdown(
           (f) => `- [FLAG] **${f.flag}** — chat: "${f.chat_says}" · tracker: "${f.tracker_says}"`,
         )
       : ['- None']),
+    ``,
+    `---`,
+    ``,
+    `## Vendor Coverage`,
+    ...(brief.vendor_coverage.length
+      ? brief.vendor_coverage.map(
+          (v) => `- **${v.vendor_type}**${v.vendor_name ? ` (${v.vendor_name})` : ''} — ${v.status}${v.last_mentioned ? ` · last mentioned ${v.last_mentioned}` : ''}${v.note ? ` · ${v.note}` : ''}`,
+        )
+      : ['- No vendor discussion in signal window']),
+    ``,
+    `---`,
+    ``,
+    `## Decision Intel`,
+    ...(brief.decision_intel.pending_decisions.length
+      ? [`**Pending:**`, ...brief.decision_intel.pending_decisions.map(
+          (d) => `- ${d.blocking ? '🔴 ' : ''}**${d.decision}** — owner: ${d.owner}${d.deadline ? ` · deadline: ${d.deadline}` : ''}`,
+        )]
+      : ['- No pending decisions']),
+    ...(brief.decision_intel.recent_decisions.length
+      ? [``, `**Recent:**`, ...brief.decision_intel.recent_decisions.map(
+          (d) => `- **${d.decision}** — ${d.decided_by}, ${d.decided_on}`,
+        )]
+      : []),
     ``,
     `---`,
     ``,
