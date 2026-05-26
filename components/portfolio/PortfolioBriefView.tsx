@@ -1,7 +1,5 @@
 'use client'
 
-import Link from 'next/link'
-
 export interface PortfolioBriefJSON {
   executive_summary: string
   patterns: Array<{
@@ -59,17 +57,19 @@ function Section({ title, count, children }: { title: string; count?: number; ch
 
 function PidChip({ pid }: { pid: number }) {
   return (
-    <Link
-      href={`/projects#pid=${pid}`}
+    <button
+      type="button"
+      onClick={() => { window.location.hash = `pid=${pid}` }}
       style={{
         fontSize: 10, padding: '2px 6px', borderRadius: 3,
         background: 'var(--surface-elevated)', color: 'var(--text-dim)',
         fontFamily: 'var(--font-mono)', textDecoration: 'none',
         border: '1px solid var(--border-subtle)',
+        cursor: 'pointer',
       }}
     >
       {pid}
-    </Link>
+    </button>
   )
 }
 
