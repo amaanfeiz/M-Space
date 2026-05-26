@@ -18,6 +18,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { config } from 'dotenv';
 import { resolve } from 'path';
 import { writeFileSync, mkdirSync, existsSync } from 'fs';
+import { todayIstYmd } from '../../lib/utils/brief-date';
 
 config({ path: resolve(process.cwd(), '../../.env.local') });
 
@@ -39,7 +40,8 @@ const VAULT_PATH =
 // --- CLI args ---
 const args = process.argv.slice(2);
 const dateArg = args.find((a) => a.startsWith('--date='))?.replace('--date=', '');
-const BRIEF_DATE = dateArg ?? new Date().toISOString().slice(0, 10);
+const BRIEF_DATE = dateArg ?? todayIstYmd();
+const forceRun = args.includes('--force');
 
 console.log(`T3 portfolio brief for ${BRIEF_DATE}\n`);
 
@@ -87,7 +89,7 @@ const PORTFOLIO_SCHEMA = {
         properties: {
           pattern: { type: 'string' },
           pids: { type: 'array', items: { type: 'integer' } },
-          severity: { type: 'string', enum: ['high', 'medium', 'low'] },
+          severity: { type: 'string', enum: ['critical', 'high', 'medium', 'low'] },
         },
         required: ['pattern', 'pids', 'severity'],
         additionalProperties: false,
@@ -236,6 +238,7 @@ async function pullContext(): Promise<{
        )`,
     )
     .eq('brief_date', BRIEF_DATE)
+    .eq('is_catchup', false)
     .order('pid', { ascending: true });
 
   if (briefsErr) throw new Error(`briefs query: ${briefsErr.message}`);
@@ -323,6 +326,7 @@ async function callOpus(userPrompt: string): Promise<{
   const response = await anthropic.messages.create({
     model: 'claude-opus-4-7',
     max_tokens: 4096,
+    temperature: 0.2,
     system: [
       {
         type: 'text' as const,
@@ -338,6 +342,11 @@ async function callOpus(userPrompt: string): Promise<{
       },
     },
   });
+
+  const u = response.usage as unknown as Record<string, number>;
+  if (u.cache_creation_input_tokens || u.cache_read_input_tokens) {
+    console.log(`  cache: write=${u.cache_creation_input_tokens ?? 0} read=${u.cache_read_input_tokens ?? 0}`);
+  }
 
   const block = response.content.find((b) => b.type === 'text');
   if (!block || block.type !== 'text') {
@@ -439,6 +448,21 @@ function renderMarkdown(brief: PortfolioBriefJSON, date: string, nPids: number):
 // =====================================================================
 
 async function main() {
+  if (!forceRun) {
+    const { data: prior } = await supabase
+      .from('cron_runs')
+      .select('id')
+      .eq('tier', 't3')
+      .eq('status', 'completed')
+      .gte('started_at', BRIEF_DATE + 'T00:00:00+05:30')
+      .lt('started_at', BRIEF_DATE + 'T24:00:00+05:30')
+      .limit(1);
+    if (prior && prior.length > 0) {
+      console.log(`T3 already completed for ${BRIEF_DATE}. Use --force to re-run.`);
+      return;
+    }
+  }
+
   console.log('Pulling per-PID briefs + SOP flags from DB...');
   const { briefs, flags } = await pullContext();
   console.log(`  ${briefs.length} briefs, ${flags.length} SOP flags loaded.\n`);

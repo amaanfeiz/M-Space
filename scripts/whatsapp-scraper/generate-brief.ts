@@ -4,6 +4,7 @@ import { config } from 'dotenv';
 import { resolve } from 'path';
 import { writeFileSync, mkdirSync } from 'fs';
 import { ALL_AMAAN_PIDS as ALL_AMAAN_PIDS_RO } from '../../lib/static/all_pids';
+import { todayIstYmd, briefDateCutoff } from '../../lib/utils/brief-date';
 
 config({ path: resolve(process.cwd(), '../../.env.local') });
 
@@ -29,6 +30,7 @@ const args = process.argv.slice(2);
 const isCatchup = args.includes('--catchup');
 const allMine = args.includes('--all-mine');
 const pidArg = args.find((a) => a.startsWith('--pid='))?.replace('--pid=', '');
+const dateArg = args.find((a) => a.startsWith('--date='))?.replace('--date=', '');
 
 let targetPids: number[];
 if (pidArg) {
@@ -258,6 +260,7 @@ const BRIEF_SCHEMA = {
     client_experience_frame: { type: 'string' },
     ai_clarification: {
       type: 'array',
+      maxItems: 3,
       items: {
         type: 'object',
         properties: {
@@ -519,7 +522,13 @@ function buildSilenceBrief(
     ],
     phase: pidState?.phase ?? 'active_planning',
     runway_pct: pidState?.runway_pct ?? null,
-    recovery_state: null,
+    recovery_state: pidState?.recovery_entered_at
+      ? {
+          entered_at: pidState.recovery_entered_at,
+          sustained_positive: pidState.recovery_sustained_positive,
+          last_positive_marker_at: pidState.recovery_last_positive_marker_at,
+        }
+      : null,
     amaan_self_loop: [],
     designer_lane: { ...EMPTY_DESIGNER_LANE, assigned_designer: project.designer },
     pm_lane: { ...EMPTY_PM_LANE, assigned_pm: project.project_manager },
@@ -964,8 +973,10 @@ async function loadSenders(pid: number): Promise<{
   const byName = new Map<string, SenderInfo>();
   const byWaId = new Map<string, SenderInfo>();
   for (const row of data ?? []) {
-    if (!row.display_label) continue;
-    const info = { display_label: row.display_label, role: row.role };
+    const info = {
+      display_label: row.display_label || row.sender_name || row.sender_wa_id || 'unknown',
+      role: row.role,
+    };
     if (row.sender_name) byName.set(row.sender_name, info);
     if (row.sender_wa_id) byWaId.set(row.sender_wa_id, info);
   }
@@ -980,10 +991,10 @@ interface SignalRow {
   chat_type: string | null;
 }
 
-async function loadSignals(pid: number, catchup: boolean): Promise<SignalRow[]> {
+async function loadSignals(pid: number, catchup: boolean, briefDate: string): Promise<SignalRow[]> {
   const cutoff = catchup
-    ? new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString() // 1 year
-    : new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(); // 14 days
+    ? briefDateCutoff(briefDate, 365)
+    : briefDateCutoff(briefDate, 14);
 
   const { data } = await supabase
     .from('signals')
@@ -1025,9 +1036,9 @@ function buildUserPrompt(
     v ? `₹${(parseFloat(v) / 100000).toFixed(1)}L` : '—';
 
   const collectedAmount = (() => {
-    const pkg = parseFloat(project.package_price_eff ?? '0');
-    const pct = parseFloat(project.collection_pct ?? '0');
-    if (!pkg || !pct) return null;
+    const pkg = parseFloat(project.package_price_eff ?? '');
+    const pct = parseFloat(project.collection_pct ?? '');
+    if (!Number.isFinite(pkg) || !Number.isFinite(pct)) return null;
     return pkg * pct / 100;
   })();
   const collectionLine = collectedAmount != null
@@ -1106,7 +1117,7 @@ STATE: phase=${pidState?.phase ?? 'unknown'} · runway=${pidState?.runway_pct !=
 Reason about expectations through this lens — a first-quarter PID without DJ locked is normal; a final-quarter PID without DJ locked is critical.
 
 === KNOWN SENDERS (from resolved roster) ===
-${[...senders.byName.values(), ...senders.byWaId.values()].map((s) => `${s.display_label} (${s.role})`).join(', ') || 'none resolved'}
+${[...new Set([...senders.byName.values(), ...senders.byWaId.values()].map((s) => `${s.display_label} (${s.role})`))].join(', ') || 'none resolved'}
 
 === PRIOR USER FEEDBACK ON BRIEFS FOR THIS PID ===
 ${feedback.length === 0
@@ -1181,6 +1192,10 @@ async function callHaiku(userPrompt: string): Promise<{ brief: HaikuBriefOutput;
       .replace(/\s*```$/, '');
 
     const brief = JSON.parse(text) as HaikuBriefOutput;
+    const u = response.usage as unknown as Record<string, number>;
+    if (u.cache_creation_input_tokens || u.cache_read_input_tokens) {
+      process.stdout.write(` cache[w:${u.cache_creation_input_tokens ?? 0}/r:${u.cache_read_input_tokens ?? 0}]`);
+    }
     return {
       brief,
       usage: {
@@ -1441,7 +1456,8 @@ function writeMarkdownFiles(
 // --- Main ---
 
 async function main() {
-  const briefDate = new Date().toISOString().slice(0, 10);
+  const start = Date.now();
+  const briefDate = dateArg ?? todayIstYmd();
   const mode = isCatchup ? 'CATCH-UP' : 'DAILY';
 
   console.log(`\nGenerating ${mode} briefs for ${targetPids.length} PID(s) — ${briefDate}`);
@@ -1456,7 +1472,7 @@ async function main() {
     const [project, senders, signals, feedback, continuity, pidState, answeredClarifications] = await Promise.all([
       loadProject(pid),
       loadSenders(pid),
-      loadSignals(pid, isCatchup),
+      loadSignals(pid, isCatchup, briefDate),
       loadRecentFeedback(pid),
       loadPriorContinuity(pid, briefDate),
       loadPidState(pid),
@@ -1493,6 +1509,10 @@ async function main() {
     const result = await callHaiku(userPrompt);
 
     if (!result) { console.log('FAILED (Haiku error)'); failed++; continue; }
+
+    if (result.brief.ai_clarification.length > 3) {
+      result.brief.ai_clarification = result.brief.ai_clarification.slice(0, 3);
+    }
 
     // Merge Haiku output with deterministic computed fields to form the full Brief JSON v2.
     const finalBrief: BriefJSON = {
@@ -1551,6 +1571,15 @@ async function main() {
   console.log(`Tokens: ${totalInput.toLocaleString()} in / ${totalOutput.toLocaleString()} out`);
   console.log(`Est. cost: $${totalUSD.toFixed(4)} (~₹${(totalUSD * 84).toFixed(0)})`);
   console.log(`Markdown: ${VAULT_PATH}\\pids\\`);
+
+  await supabase.from('cron_runs').insert({
+    tier: 't1',
+    started_at: new Date(start).toISOString(),
+    finished_at: new Date().toISOString(),
+    status: failed > 0 && ok === 0 ? 'failed' : failed > 0 ? 'partial' : 'completed',
+    rows_written: ok,
+    cost_inr: Math.round(totalUSD * 84 * 100) / 100,
+  });
 }
 
 main().catch((err) => { console.error(err); process.exit(1); });

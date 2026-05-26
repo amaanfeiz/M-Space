@@ -1043,7 +1043,7 @@ export function DetailPanel() {
 
     Promise.all([
       // Latest brief
-      supabase.from('briefs').select('id, brief_json, brief_date, is_catchup').eq('pid', pid).order('brief_date', { ascending: false }).limit(1).single(),
+      supabase.from('briefs').select('id, brief_json, brief_date, is_catchup').eq('pid', pid).eq('is_catchup', false).order('brief_date', { ascending: false }).limit(1).single(),
       // 14-day signals (for sparkline + comms)
       supabase.from('signals').select('sent_at, chat_type').eq('pid', pid).gte('sent_at', cutoff14).order('sent_at', { ascending: true }),
       // 14-day briefs (for sparkline sentiment)
@@ -1069,8 +1069,17 @@ export function DetailPanel() {
       const sparkline14Briefs = (briefsRes.data ?? []) as Array<{ brief_date: string; brief_json: BriefJSON }>
       setSparklineDays(buildSparklineDays(signals, sparkline14Briefs))
 
-      // Recent messages — enrich with display_label via signal_senders if possible
-      setRecentMessages((recentRes.data ?? []) as RecentMessage[])
+      // Recent messages — enrich with display_label via signal_senders
+      const rawMsgs = (recentRes.data ?? []) as RecentMessage[]
+      supabase.from('signal_senders').select('sender_name, sender_wa_id, display_label').eq('pid', pid).then(({ data: senders }) => {
+        if (!senders || senders.length === 0) { setRecentMessages(rawMsgs); return }
+        const byName = new Map(senders.filter(s => s.sender_name).map(s => [s.sender_name, s.display_label]))
+        const byWaId = new Map(senders.filter(s => s.sender_wa_id).map(s => [s.sender_wa_id, s.display_label]))
+        setRecentMessages(rawMsgs.map(m => ({
+          ...m,
+          display_label: (m.sender_wa_id && byWaId.get(m.sender_wa_id)) || (m.sender_name && byName.get(m.sender_name)) || m.display_label,
+        })))
+      })
 
       // Portfolio mentions
       if (portfolioRes.data) {

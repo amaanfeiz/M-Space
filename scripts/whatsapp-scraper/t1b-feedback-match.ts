@@ -21,6 +21,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { config } from 'dotenv';
 import { resolve } from 'path';
+import { todayIstYmd } from '../../lib/utils/brief-date';
 
 config({ path: resolve(process.cwd(), '../../.env.local') });
 
@@ -31,7 +32,7 @@ const supabase = createClient(
 
 const args = process.argv.slice(2);
 const dateArg = args.find((a) => a.startsWith('--date='))?.replace('--date=', '');
-const TODAY = dateArg ?? new Date().toISOString().slice(0, 10);
+const TODAY = dateArg ?? todayIstYmd();
 
 console.log(`T1b implicit feedback matcher — brief_date: ${TODAY}\n`);
 
