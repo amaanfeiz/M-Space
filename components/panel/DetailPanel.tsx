@@ -804,20 +804,13 @@ function AIClarification({ pid }: { pid: number }) {
       .gte('brief_date', sevenDaysAgo)
       .order('brief_date', { ascending: false })
       .order('created_at', { ascending: false })
-    // Deduplicate: keep only the most recent version of each question.
-    // Rows are ordered by brief_date desc, so first occurrence wins.
-    // Use a fuzzy key (sorted content words) so slight rephrases collapse.
-    const STOP = new Set(['is', 'the', 'a', 'an', 'or', 'and', 'has', 'was', 'been', 'are', 'this', 'that', 'with', 'for', 'on', 'in', 'to', 'of', 'do', 'does', 'did'])
-    const fuzzyKey = (q: string) => q.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(w => w.length > 1 && !STOP.has(w)).sort().join(' ')
-    const seen = new Set<string>()
-    const deduped: BriefClarificationRow[] = []
-    for (const r of (data ?? []) as BriefClarificationRow[]) {
-      const key = fuzzyKey(r.question)
-      if (seen.has(key)) continue
-      seen.add(key)
-      deduped.push(r)
-    }
-    setRows(deduped)
+    const all = (data ?? []) as BriefClarificationRow[]
+    // Show unanswered questions from latest brief date only (today's brief
+    // regenerates all still-relevant uncertainties, older dupes are noise).
+    // Always show answered questions regardless of date (they're context).
+    const latestDate = all[0]?.brief_date
+    const filtered = all.filter(r => r.amaan_answer || r.brief_date === latestDate)
+    setRows(filtered)
   }, [pid, supabase])
 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- standard data-load on mount
