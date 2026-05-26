@@ -15,7 +15,8 @@ export const ALL_AMAAN_PIDS: readonly number[] = [
   25210, 26903, 30646, 30969, 32125, 29662, 32245,
   33487, 31341, 23671, 28438, 28166, 29568,
   // 11 added 2026-05-11 — no historical export, scraper only
-  28698, 21491, 33797, 28625, 30731, 33673,
+  // 28625 removed 2026-05-26 — Cancelled (Priyam & Manish)
+  28698, 21491, 33797, 30731, 33673,
   33565, 31574, 33313, 33867, 34002,
   // 2 added 2026-05-18 — both Booked, both Sales WIP (no planner yet)
   30260, 34656,
