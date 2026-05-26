@@ -326,7 +326,6 @@ async function callOpus(userPrompt: string): Promise<{
   const response = await anthropic.messages.create({
     model: 'claude-opus-4-7',
     max_tokens: 4096,
-    temperature: 0.2,
     system: [
       {
         type: 'text' as const,
