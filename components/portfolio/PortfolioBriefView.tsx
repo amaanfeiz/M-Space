@@ -60,7 +60,7 @@ function Section({ title, count, children }: { title: string; count?: number; ch
 function PidChip({ pid }: { pid: number }) {
   return (
     <Link
-      href={`/projects?pid=${pid}`}
+      href={`/projects#pid=${pid}`}
       style={{
         fontSize: 10, padding: '2px 6px', borderRadius: 3,
         background: 'var(--surface-elevated)', color: 'var(--text-dim)',

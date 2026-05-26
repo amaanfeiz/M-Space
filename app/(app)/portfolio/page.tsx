@@ -52,7 +52,7 @@ export default async function PortfolioPage({
   return (
     <div style={{
       display: 'flex', flexDirection: 'column', gap: 16,
-      maxWidth: 720, margin: '0 auto', padding: '16px 12px 32px',
+      padding: '16px 20px 32px',
     }}>
       {/* Sticky date header */}
       <div style={{
