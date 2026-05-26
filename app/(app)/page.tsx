@@ -159,7 +159,7 @@ export default async function DashboardPage() {
     if (firstUnack) {
       nudgeCandidates.push({ pid, text: `Unanswered ${firstUnack.days_unanswered}d: "${firstUnack.request}"`, rank })
     } else if (firstUrgent) {
-      nudgeCandidates.push({ pid, text: firstUrgent.action, rank })
+      nudgeCandidates.push({ pid, text: firstUrgent.headline || firstUrgent.action || '', rank })
     }
   }
   nudgeCandidates.sort((a, b) => a.rank - b.rank)
@@ -185,7 +185,7 @@ export default async function DashboardPage() {
       items.push({ kind: 'unanswered', text: r.request, meta: `unanswered ${r.days_unanswered}d` })
     }
     for (const n of brief.needs_you ?? []) {
-      if (n.priority === 'urgent') items.push({ kind: 'needs_you', text: n.action })
+      if (n.priority === 'urgent') items.push({ kind: 'needs_you', text: n.headline || n.action || '' })
     }
     if (items.length === 0) continue
     urgentByPid.push({

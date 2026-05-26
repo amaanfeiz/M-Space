@@ -123,7 +123,7 @@ type StatusStripProps = {
   communicationRisk: string | null
   sentimentRisk: string | null
   // Brief needs_you for brief-flagged pills (optional)
-  needsYou?: Array<{ action: string; priority: string }>
+  needsYou?: NeedsYouItem[]
   onScrollToRiskTracker?: () => void
 }
 
@@ -133,24 +133,27 @@ const TRACKER_RISK_LABELS: Array<{ field: keyof StatusStripProps; label: string 
   { field: 'sentimentRisk', label: 'Sentiment' },
 ]
 
-const RISK_KEYWORDS = ['sentiment risk', 'collection risk', 'visibility risk', 'process risk', 'execution risk']
+type NeedsYouItem = {
+  headline?: string
+  detail?: string
+  action?: string
+  priority: string
+  risk_type?: string
+}
 
-function extractBriefRiskPills(needsYou: Array<{ action: string; priority: string }>): RiskPillData[] {
+function extractBriefRiskPills(needsYou: NeedsYouItem[]): RiskPillData[] {
   const seen = new Set<string>()
   const pills: RiskPillData[] = []
   for (const n of needsYou) {
-    const lower = n.action.toLowerCase()
-    for (const kw of RISK_KEYWORDS) {
-      if (lower.includes(kw) && !seen.has(kw)) {
-        seen.add(kw)
-        const label = kw.replace(' risk', '')
-        pills.push({
-          label,
-          severity: n.priority === 'urgent' ? 'critical' : n.priority === 'soon' ? 'attention' : 'attention',
-          source: 'brief',
-          tooltip: "From today's brief · needs you",
-        })
-      }
+    const rt = n.risk_type
+    if (rt && !seen.has(rt)) {
+      seen.add(rt)
+      pills.push({
+        label: rt,
+        severity: n.priority === 'urgent' ? 'critical' : 'attention',
+        source: 'brief',
+        tooltip: `From today's brief · ${n.headline || n.action || 'needs you'}`,
+      })
     }
   }
   return pills

@@ -37,16 +37,25 @@ function levenshtein(a: string, b: string): number {
   return dp[m][n];
 }
 
-// "~ Aayushi" → "aayushi"   |   "Bhavika Meragi" → "bhavika"
+// Known spelling aliases — applied after first-name extraction
+const NAME_ALIASES: Record<string, string> = {
+  sreyanshu: 'shreyanshu',
+};
+
+// Normalize "~ Aayushi", "Bhavika Meragi", "Aditya Meragi RJ", "Meragi Sreyanshu",
+// "Vaibhav RJ Meragi", "Amaan Personal" → first_name (lowercase, alias-applied)
 function normalizeFirst(name: string): string {
-  return (
-    name
-      .replace(/^~\s*/, '')
-      .replace(/\s+meragi\s*$/i, '')
-      .trim()
-      .toLowerCase()
-      .split(/[\s_]+/)[0] ?? ''
-  );
+  let s = name.replace(/^~\s*/, '').trim();
+  // Strip "Meragi" prefix (e.g., "Meragi Sreyanshu" → "Sreyanshu")
+  s = s.replace(/^meragi\s+/i, '');
+  // Iteratively strip trailing tokens — handles "Aditya Meragi RJ" → "Aditya"
+  let prev = '';
+  while (prev !== s) {
+    prev = s;
+    s = s.replace(/\s+(meragi|rj|pm|vm\s+lead|vm|personal|lead|sales)\s*$/i, '');
+  }
+  const first = (s.toLowerCase().split(/[\s_]+/)[0] ?? '').replace(/[^a-z]/g, '');
+  return NAME_ALIASES[first] ?? first;
 }
 
 interface ProjectRow {
@@ -97,6 +106,57 @@ function resolveFromProjects(
   }
 
   return null;
+}
+
+// --- Pass 1.5: wa_contact_map lookup (preferred over Haiku for wa_id senders) ---
+
+interface WaContact {
+  wa_id: string;
+  saved_name: string | null;
+  pushname: string | null;
+  is_my_contact: boolean | null;
+}
+
+async function loadWaContactMap(): Promise<Map<string, WaContact>> {
+  const m = new Map<string, WaContact>();
+  let from = 0;
+  const page = 1000;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const { data } = await supabase
+      .from('wa_contact_map')
+      .select('wa_id, saved_name, pushname, is_my_contact')
+      .range(from, from + page - 1);
+    if (!data || data.length === 0) break;
+    for (const r of data) m.set(r.wa_id as string, r as WaContact);
+    if (data.length < page) break;
+    from += page;
+  }
+  return m;
+}
+
+function resolveFromContactMap(
+  contact: WaContact | undefined,
+  project: ProjectRow,
+): { role: Role; displayLabel: string } | null {
+  if (!contact) return null;
+  const rawName = contact.saved_name ?? contact.pushname;
+  if (!rawName) return null;
+
+  // Try matching the contact's name against the project roster
+  const projectMatch = resolveFromProjects(rawName, project);
+  if (projectMatch) return projectMatch;
+
+  // Not in roster but saved in Amaan's contacts → another Meragi person
+  if (contact.is_my_contact) {
+    const first = normalizeFirst(rawName);
+    if (!first) return null;
+    const display = first.charAt(0).toUpperCase() + first.slice(1);
+    return { role: 'meragi_other', displayLabel: `${display} (Meragi)` };
+  }
+
+  // External (client/vendor/etc) but we know their pushname — label honestly
+  return { role: 'unknown', displayLabel: `${rawName} (Unknown)` };
 }
 
 // --- Pass 2: Haiku classification ---
@@ -186,7 +246,7 @@ type Row = {
   sender_wa_id: string | null;
   role: Role;
   display_label: string | null;
-  resolved_via: 'auto_projects' | 'auto_llm';
+  resolved_via: 'auto_projects' | 'auto_llm' | 'wa_contact_map' | 'manual';
   resolved_at: string;
 };
 
@@ -219,11 +279,14 @@ async function paginateSignals(
 }
 
 async function main() {
+  const resolveStart = Date.now();
   // --- Collect distinct senders: by name (external groups) + by wa_id (internal groups) ---
-  const [byNameSeen, byWaIdSeen] = await Promise.all([
+  const [byNameSeen, byWaIdSeen, waContactMap] = await Promise.all([
     paginateSignals('name'),
     paginateSignals('wa_id'),
+    loadWaContactMap(),
   ]);
+  console.log(`Loaded ${waContactMap.size} wa_contact_map entries`);
 
   // Skip already-resolved pairs
   const { data: existing } = await supabase.from('signal_senders').select('pid, sender_name, sender_wa_id');
@@ -249,7 +312,7 @@ async function main() {
   const rows: Row[] = [];
   const manualQueue: Array<{ pid: number; key: string }> = [];
   const now = new Date().toISOString();
-  const passCount = { tl: 0, projects: 0, haiku: 0, unknown: 0 };
+  const passCount = { tl: 0, projects: 0, contact_map: 0, haiku: 0, unknown: 0 };
 
   // --- Process name-keyed senders ---
   const byPidName = new Map<number, string[]>();
@@ -327,7 +390,7 @@ async function main() {
     console.log(`\nPID ${pid} (by wa_id) — ${waIds.length} new sender(s):`);
 
     for (const waId of waIds) {
-      // Pass 0 — known wa_ids from env
+      // Pass 0 — known wa_ids from env (TL fast path)
       if (TL_WA_ID && waId === TL_WA_ID) {
         const tlName = project?.team_lead?.trim().split(/\s+/)[0] ?? 'TL';
         const label = `${tlName} (TL)`;
@@ -337,7 +400,30 @@ async function main() {
         continue;
       }
 
-      // Pass 1 — fuzzy match won't work on wa_id; skip to Haiku
+      // Pass 1.5 — wa_contact_map (Amaan's saved WA contacts + pushname). Authoritative.
+      // Skips Haiku for any wa_id we've already enriched via enrich-contacts.ts.
+      if (project) {
+        const contactMatch = resolveFromContactMap(waContactMap.get(waId), project);
+        if (contactMatch) {
+          console.log(
+            `  [contact]   "${waId}" → ${contactMatch.role}  "${contactMatch.displayLabel}"`,
+          );
+          rows.push({
+            pid,
+            sender_name: waId,
+            sender_wa_id: waId,
+            role: contactMatch.role,
+            display_label: contactMatch.displayLabel,
+            resolved_via: 'wa_contact_map',
+            resolved_at: now,
+          });
+          passCount.contact_map++;
+          continue;
+        }
+      }
+
+      // Pass 2 — Haiku fallback (only for wa_ids absent from wa_contact_map).
+      // After enrich-contacts.ts runs this should rarely fire.
       const { data: msgRows } = await supabase
         .from('signals')
         .select('body')
@@ -380,10 +466,11 @@ async function main() {
   }
 
   console.log(`\n=== Done ===`);
-  console.log(`  env/tl        : ${passCount.tl}`);
-  console.log(`  auto_projects : ${passCount.projects}`);
-  console.log(`  auto_llm      : ${passCount.haiku}`);
-  console.log(`  unknown       : ${passCount.unknown}`);
+  console.log(`  env/tl         : ${passCount.tl}`);
+  console.log(`  auto_projects  : ${passCount.projects}`);
+  console.log(`  wa_contact_map : ${passCount.contact_map}`);
+  console.log(`  auto_llm       : ${passCount.haiku}`);
+  console.log(`  unknown        : ${passCount.unknown}`);
 
   if (manualQueue.length > 0) {
     console.log(`\nManual review needed (${manualQueue.length}):`);
@@ -394,6 +481,15 @@ async function main() {
       );
     }
   }
+
+  const totalResolved = passCount.tl + passCount.projects + passCount.contact_map + passCount.haiku;
+  await supabase.from('cron_runs').insert({
+    tier: 'resolve_senders',
+    started_at: new Date(resolveStart).toISOString(),
+    finished_at: new Date().toISOString(),
+    status: 'completed',
+    rows_written: totalResolved,
+  });
 }
 
 main().catch((err) => { console.error(err); process.exit(1); });

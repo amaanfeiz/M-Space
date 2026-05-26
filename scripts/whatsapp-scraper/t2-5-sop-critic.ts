@@ -16,6 +16,7 @@ import { createClient } from '@supabase/supabase-js';
 import Anthropic from '@anthropic-ai/sdk';
 import { config } from 'dotenv';
 import { resolve } from 'path';
+import { todayIstYmd } from '../../lib/utils/brief-date';
 
 config({ path: resolve(process.cwd(), '../../.env.local') });
 
@@ -33,7 +34,8 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const args = process.argv.slice(2);
 const dateArg = args.find((a) => a.startsWith('--date='))?.replace('--date=', '');
-const BRIEF_DATE = dateArg ?? new Date().toISOString().slice(0, 10);
+const BRIEF_DATE = dateArg ?? todayIstYmd();
+const forceRun = args.includes('--force');
 
 // ---------------------------------------------------------------------------
 // Types
@@ -255,6 +257,10 @@ async function callSonnet(userPrompt: string): Promise<{ result: CritiqueResult;
       },
     });
 
+    const u = response.usage as unknown as Record<string, number>;
+    if (u.cache_creation_input_tokens || u.cache_read_input_tokens) {
+      process.stdout.write(` cache[w:${u.cache_creation_input_tokens ?? 0}/r:${u.cache_read_input_tokens ?? 0}]`);
+    }
     const block = response.content.find((b) => b.type === 'text');
     if (!block || block.type !== 'text') return null;
     const text = block.text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
@@ -275,6 +281,21 @@ async function callSonnet(userPrompt: string): Promise<{ result: CritiqueResult;
 
 async function main() {
   console.log(`T2.5 SOP critic — brief_date: ${BRIEF_DATE}\n`);
+
+  if (!forceRun) {
+    const { data: prior } = await supabase
+      .from('cron_runs')
+      .select('id')
+      .eq('tier', 't2_5')
+      .eq('status', 'completed')
+      .gte('started_at', BRIEF_DATE + 'T00:00:00+05:30')
+      .lt('started_at', BRIEF_DATE + 'T24:00:00+05:30')
+      .limit(1);
+    if (prior && prior.length > 0) {
+      console.log(`T2.5 already completed for ${BRIEF_DATE}. Use --force to re-run.`);
+      return;
+    }
+  }
 
   const flaggedPids = await loadFlaggedPids();
   console.log(`Flagged PIDs to critique: ${flaggedPids.length}`);

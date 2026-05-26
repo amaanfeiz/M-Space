@@ -22,9 +22,16 @@ export interface BriefJSON {
     due: string
     status: 'open' | 'done' | 'overdue' | 'unclear'
   }>
-  needs_you: Array<{ action: string; priority: 'urgent' | 'soon' | 'when_able' }>
+  needs_you: Array<{
+    headline?: string
+    detail?: string
+    action?: string
+    priority: 'urgent' | 'soon' | 'when_able'
+    risk_type?: 'sentiment' | 'collection' | 'visibility' | 'process' | 'execution' | 'cancellation'
+  }>
   unacknowledged_requests?: Array<{
     request: string
+    verbatim?: string
     asked_by: string
     asked_on: string
     days_unanswered: number
@@ -54,6 +61,26 @@ export interface BriefJSON {
     entered_at: string
     sustained_positive: boolean
     last_positive_marker_at: string | null
+  }
+  vendor_coverage?: Array<{
+    vendor_type: string
+    vendor_name: string
+    status: 'confirmed' | 'pending' | 'at_risk' | 'unknown'
+    last_mentioned: string
+    note: string
+  }>
+  decision_intel?: {
+    pending_decisions: Array<{
+      decision: string
+      owner: string
+      deadline: string
+      blocking: boolean
+    }>
+    recent_decisions: Array<{
+      decision: string
+      decided_by: string
+      decided_on: string
+    }>
   }
   designer_lane?: {
     assigned_designer: string | null
@@ -220,8 +247,13 @@ export function BriefBody({ brief, briefDate, isCatchup }: { brief: BriefJSON; b
                 </span>
               </div>
               <div style={{ color: 'var(--text-primary)' }}>
-                &ldquo;{r.request}&rdquo;
+                {r.request}
               </div>
+              {r.verbatim && (
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3, paddingLeft: 8, borderLeft: '2px solid var(--border-default)', fontStyle: 'italic' }}>
+                  &ldquo;{r.verbatim}&rdquo;
+                </div>
+              )}
               <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
                 {r.asked_by} · {r.asked_on}
               </div>
@@ -233,22 +265,38 @@ export function BriefBody({ brief, briefDate, isCatchup }: { brief: BriefJSON; b
       {/* Needs You */}
       <Section title="Needs You">
         {brief.needs_you?.length > 0
-          ? brief.needs_you.map((n, i) => (
-              <div key={i} style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4, display: 'flex', gap: 6, alignItems: 'baseline' }}>
-                <span
-                  style={{
-                    fontSize: 9,
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    color: PRIORITY_COLOR[n.priority] ?? 'var(--text-dim)',
-                    flexShrink: 0,
-                  }}
-                >
-                  {n.priority.replace('_', ' ')}
-                </span>
-                <span style={{ color: 'var(--text-primary)' }}>{n.action}</span>
-              </div>
-            ))
+          ? brief.needs_you.map((n, i) => {
+              const headline = n.headline || (n.action ? n.action.split(/[.—–]/, 1)[0]?.trim() : '')
+              const detail = n.detail || n.action || ''
+              return (
+                <div key={i} style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
+                    <span
+                      style={{
+                        fontSize: 9,
+                        fontWeight: 700,
+                        textTransform: 'uppercase',
+                        color: PRIORITY_COLOR[n.priority] ?? 'var(--text-dim)',
+                        flexShrink: 0,
+                      }}
+                    >
+                      {n.priority.replace('_', ' ')}
+                    </span>
+                    <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{headline}</span>
+                    {n.risk_type && (
+                      <span style={{ fontSize: 9, color: 'var(--text-dim)', textTransform: 'uppercase', flexShrink: 0 }}>
+                        {n.risk_type}
+                      </span>
+                    )}
+                  </div>
+                  {detail !== headline && (
+                    <div style={{ color: 'var(--text-muted)', marginTop: 2, paddingLeft: 0, fontSize: 11 }}>
+                      {detail}
+                    </div>
+                  )}
+                </div>
+              )
+            })
           : <EmptyLine>Nothing requires you right now.</EmptyLine>
         }
       </Section>

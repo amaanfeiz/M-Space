@@ -4,6 +4,7 @@ import { config } from 'dotenv';
 import { resolve } from 'path';
 import { writeFileSync, mkdirSync } from 'fs';
 import { ALL_AMAAN_PIDS as ALL_AMAAN_PIDS_RO } from '../../lib/static/all_pids';
+import { todayIstYmd, briefDateCutoff } from '../../lib/utils/brief-date';
 
 config({ path: resolve(process.cwd(), '../../.env.local') });
 
@@ -29,6 +30,7 @@ const args = process.argv.slice(2);
 const isCatchup = args.includes('--catchup');
 const allMine = args.includes('--all-mine');
 const pidArg = args.find((a) => a.startsWith('--pid='))?.replace('--pid=', '');
+const dateArg = args.find((a) => a.startsWith('--date='))?.replace('--date=', '');
 
 let targetPids: number[];
 if (pidArg) {
@@ -76,11 +78,14 @@ interface HaikuBriefOutput {
     status: 'open' | 'done' | 'overdue' | 'unclear';
   }>;
   needs_you: Array<{
-    action: string;
+    headline: string;
+    detail: string;
     priority: 'urgent' | 'soon' | 'when_able';
+    risk_type?: 'sentiment' | 'collection' | 'visibility' | 'process' | 'execution' | 'cancellation';
   }>;
   unacknowledged_requests: Array<{
     request: string;
+    verbatim?: string;
     asked_by: string;
     asked_on: string;
     days_unanswered: number;
@@ -100,6 +105,26 @@ interface HaikuBriefOutput {
     reason: string;
     category: 'sentiment' | 'payment' | 'team' | 'vendor' | 'other';
   }>;
+  vendor_coverage: Array<{
+    vendor_type: string;
+    vendor_name: string;
+    status: 'confirmed' | 'pending' | 'at_risk' | 'unknown';
+    last_mentioned: string;
+    note: string;
+  }>;
+  decision_intel: {
+    pending_decisions: Array<{
+      decision: string;
+      owner: string;
+      deadline: string;
+      blocking: boolean;
+    }>;
+    recent_decisions: Array<{
+      decision: string;
+      decided_by: string;
+      decided_on: string;
+    }>;
+  };
 }
 
 // Final persisted brief = Haiku output + deterministic computed fields.
@@ -213,10 +238,12 @@ const BRIEF_SCHEMA = {
       items: {
         type: 'object',
         properties: {
-          action: { type: 'string' },
+          headline: { type: 'string' },
+          detail: { type: 'string' },
           priority: { type: 'string', enum: ['urgent', 'soon', 'when_able'] },
+          risk_type: { type: 'string', enum: ['sentiment', 'collection', 'visibility', 'process', 'execution', 'cancellation'] },
         },
-        required: ['action', 'priority'],
+        required: ['headline', 'detail', 'priority'],
         additionalProperties: false,
       },
     },
@@ -226,11 +253,12 @@ const BRIEF_SCHEMA = {
         type: 'object',
         properties: {
           request: { type: 'string' },
+          verbatim: { type: 'string' },
           asked_by: { type: 'string' },
           asked_on: { type: 'string' },
           days_unanswered: { type: 'integer' },
         },
-        required: ['request', 'asked_by', 'asked_on', 'days_unanswered'],
+        required: ['request', 'verbatim', 'asked_by', 'asked_on', 'days_unanswered'],
         additionalProperties: false,
       },
     },
@@ -258,6 +286,7 @@ const BRIEF_SCHEMA = {
     client_experience_frame: { type: 'string' },
     ai_clarification: {
       type: 'array',
+      maxItems: 3,
       items: {
         type: 'object',
         properties: {
@@ -269,11 +298,60 @@ const BRIEF_SCHEMA = {
         additionalProperties: false,
       },
     },
+    vendor_coverage: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          vendor_type: { type: 'string' },
+          vendor_name: { type: 'string' },
+          status: { type: 'string', enum: ['confirmed', 'pending', 'at_risk', 'unknown'] },
+          last_mentioned: { type: 'string' },
+          note: { type: 'string' },
+        },
+        required: ['vendor_type', 'vendor_name', 'status', 'last_mentioned', 'note'],
+        additionalProperties: false,
+      },
+    },
+    decision_intel: {
+      type: 'object',
+      properties: {
+        pending_decisions: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              decision: { type: 'string' },
+              owner: { type: 'string' },
+              deadline: { type: 'string' },
+              blocking: { type: 'boolean' },
+            },
+            required: ['decision', 'owner', 'deadline', 'blocking'],
+            additionalProperties: false,
+          },
+        },
+        recent_decisions: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              decision: { type: 'string' },
+              decided_by: { type: 'string' },
+              decided_on: { type: 'string' },
+            },
+            required: ['decision', 'decided_by', 'decided_on'],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ['pending_decisions', 'recent_decisions'],
+      additionalProperties: false,
+    },
   },
   required: [
     'client_pulse', 'team_status', 'what_changed', 'commitments', 'needs_you',
     'unacknowledged_requests', 'open_questions', 'cross_source_flags',
-    'client_experience_frame', 'ai_clarification',
+    'client_experience_frame', 'ai_clarification', 'vendor_coverage', 'decision_intel',
   ],
   additionalProperties: false,
 };
@@ -296,7 +374,7 @@ Read the project context (hard facts from the tracker) and WhatsApp chat signals
 2. EVERY soft-signal claim (client_pulse summary, what_changed items, commitment owner, etc.) must end with [Display Label, DD MMM] attribution showing who said it and when.
 3. If evidence is thin (e.g. only 2 messages), reflect low confidence. Do not pad sections.
 4. COMMITMENTS: extract only explicit promises ("I'll send X by Friday", "We'll confirm by Monday"). Not vague intentions.
-4b. UNACKNOWLEDGED REQUESTS — most critical category. List every client message in the chat window that contains a request, a question, or a decision the team has to make, where there is no team reply within 24 hours of the client message. For each entry: "request" = a one-line paraphrase of what the client asked for, "asked_by" = client display label, "asked_on" = DD MMM, "days_unanswered" = whole days from the client message to TODAY. If everything has been answered, return an empty array. Do NOT skip entries because they seem minor — an unanswered client is the highest-priority signal. A "request" is also when the client provides a piece of information that needs an acknowledgement, not just an explicit question.
+4b. UNACKNOWLEDGED REQUESTS — most critical category. List every client message in the chat window that contains a request, a question, or a decision the team has to make, where there is no team reply within 24 hours of the client message. For each entry: "request" = a one-line paraphrase, "verbatim" = the EXACT quote from the client's message (copy verbatim, do not paraphrase), "asked_by" = client display label, "asked_on" = DD MMM, "days_unanswered" = whole days from the client message to TODAY. If everything has been answered, return an empty array. Do NOT skip entries because they seem minor — an unanswered client is the highest-priority signal. A "request" is also when the client provides a piece of information that needs an acknowledgement, not just an explicit question.
 5. OPEN QUESTIONS: compose a SINGLE WhatsApp message for Amaan to send to the internal group. Rules:
    (a) Always open with "Hey Team," — NEVER address a specific planner by name. Amaan sends to the whole team.
    (b) On the second line add: "If any of these were discussed on call, please ensure there's a text trail." — always include this.
@@ -308,7 +386,7 @@ Read the project context (hard facts from the tracker) and WhatsApp chat signals
    (h) If there is nothing to clarify, set clarification_message to an empty string.
    (i) CONTINUITY — if Amaan asked something in the internal group in a prior brief and the team hasn't substantively responded, today's point references that prior ask: "Guys, still waiting on a response on X" or "any movement on the Y I asked about yesterday?" Do NOT restart conversations with fresh "what's the update on X" when X was already asked.
 6. CROSS-SOURCE FLAGS: raise a flag when chat clearly contradicts a tracker field, OR when commercial vocabulary (CP, SP, markup, margin, commission) appears in the CLIENT group — that is a severity-1 trust risk regardless of tracker state. Do not flag speculative differences.
-7. NEEDS YOU: surface only things that genuinely require Amaan's decision or action. Order client-experienced flags first (what the client is currently feeling/waiting on); place hidden process flags the client has no awareness of below them.
+7. NEEDS YOU: surface only things that genuinely require Amaan's decision or action. Each item has a "headline" (<15 words, TL-scannable) and a "detail" (full explanation with attribution). Tag each with a "risk_type" from: sentiment, collection, visibility, process, execution, cancellation. Order client-experienced flags first.
 8. ATTRIBUTION OF BLAME: separate client engagement risk from planner ownership failure. If the client is silent but the planner has been proactive and followed up, do NOT frame this as a planner issue. Blame must match evidence.
 9. OVER-FLAGGING: do not flag isolated words like "delay" or "waiting" as risk signals. Tie severity to: repetition, blame pattern, payment proximity, event proximity, and whether the team broke a communication loop.
 10. FLAG FRAMING: when raising any flag in needs_you or client_pulse, name which risk it represents — sentiment risk, collection risk, visibility risk, process risk, or execution risk. This helps Amaan triage.
@@ -332,6 +410,10 @@ Beyond the existing sections, emit two more fields:
 - "Silent 30d since payment ask — engagement risk."
 - "Fully aligned, no active expectation."
 Never empty. If nothing is active, say "No active expectation" or describe the current calm.
+
+**vendor_coverage** — array of vendor mentions extracted from chat. For each vendor discussed in the signal window: vendor_type (photographer, decorator, caterer, florist, venue, DJ, pandit, choreographer, makeup_artist, lighting, videographer, entertainment, other), vendor_name (name if mentioned, "" if unnamed), status (confirmed = locked in, pending = discussed but not confirmed, at_risk = issues/delays, unknown = just mentioned), last_mentioned (DD MMM), note (one-line context). Only include vendors actually discussed in signals. Empty array if no vendor conversation in window.
+
+**decision_intel** — { pending_decisions, recent_decisions }. pending_decisions: things that need a decision but haven't been made yet (deadline = DD MMM or "", blocking = true if other work is waiting on this). recent_decisions: decisions made in the signal window (decided_by = display label, decided_on = DD MMM). Only include clear decisions, not vague preferences. Both arrays can be empty.
 
 **ai_clarification** — 0 to 3 items where you genuinely need TL context or are uncertain. Each: { question, reason, category }. Categories: sentiment | payment | team | vendor | other. Examples:
 - { question: "Is Aditya off this week?", reason: "Zero internal-group activity in 6 days, unusual for him", category: "team" }
@@ -501,8 +583,10 @@ function buildSilenceBrief(
     what_changed: [`No team or client activity in window. Last signal was ${lastDateLabel} (${daysSilent} days ago).`],
     commitments: [],
     needs_you: [{
-      action: `Silence risk: PID silent ${daysSilent} days. Last activity ${lastDateLabel}. Project is Planning In-Progress with ${project.planner} as planner — chase status with planner today and confirm whether project is genuinely stalled or just off-channel.`,
+      headline: `PID silent ${daysSilent}d — chase planner status`,
+      detail: `Last activity ${lastDateLabel}. Project is Planning In-Progress with ${project.planner} as planner — chase status with planner today and confirm whether project is genuinely stalled or just off-channel.`,
       priority: 'urgent',
+      risk_type: 'visibility',
     }],
     unacknowledged_requests: [],
     open_questions: {
@@ -519,12 +603,20 @@ function buildSilenceBrief(
     ],
     phase: pidState?.phase ?? 'active_planning',
     runway_pct: pidState?.runway_pct ?? null,
-    recovery_state: null,
+    recovery_state: pidState?.recovery_entered_at
+      ? {
+          entered_at: pidState.recovery_entered_at,
+          sustained_positive: pidState.recovery_sustained_positive,
+          last_positive_marker_at: pidState.recovery_last_positive_marker_at,
+        }
+      : null,
     amaan_self_loop: [],
     designer_lane: { ...EMPTY_DESIGNER_LANE, assigned_designer: project.designer },
     pm_lane: { ...EMPTY_PM_LANE, assigned_pm: project.project_manager },
     vm_lane: EMPTY_VM_LANE,
     commercial_trail: [],
+    vendor_coverage: [],
+    decision_intel: { pending_decisions: [], recent_decisions: [] },
     phase_expectations: computePhaseExpectations(pidState),
     exceptional_pid_score: EMPTY_EXCEPTIONAL_SCORE,
   };
@@ -964,8 +1056,10 @@ async function loadSenders(pid: number): Promise<{
   const byName = new Map<string, SenderInfo>();
   const byWaId = new Map<string, SenderInfo>();
   for (const row of data ?? []) {
-    if (!row.display_label) continue;
-    const info = { display_label: row.display_label, role: row.role };
+    const info = {
+      display_label: row.display_label || row.sender_name || row.sender_wa_id || 'unknown',
+      role: row.role,
+    };
     if (row.sender_name) byName.set(row.sender_name, info);
     if (row.sender_wa_id) byWaId.set(row.sender_wa_id, info);
   }
@@ -980,10 +1074,10 @@ interface SignalRow {
   chat_type: string | null;
 }
 
-async function loadSignals(pid: number, catchup: boolean): Promise<SignalRow[]> {
+async function loadSignals(pid: number, catchup: boolean, briefDate: string): Promise<SignalRow[]> {
   const cutoff = catchup
-    ? new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString() // 1 year
-    : new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(); // 14 days
+    ? briefDateCutoff(briefDate, 365)
+    : briefDateCutoff(briefDate, 14);
 
   const { data } = await supabase
     .from('signals')
@@ -1025,9 +1119,9 @@ function buildUserPrompt(
     v ? `₹${(parseFloat(v) / 100000).toFixed(1)}L` : '—';
 
   const collectedAmount = (() => {
-    const pkg = parseFloat(project.package_price_eff ?? '0');
-    const pct = parseFloat(project.collection_pct ?? '0');
-    if (!pkg || !pct) return null;
+    const pkg = parseFloat(project.package_price_eff ?? '');
+    const pct = parseFloat(project.collection_pct ?? '');
+    if (!Number.isFinite(pkg) || !Number.isFinite(pct)) return null;
     return pkg * pct / 100;
   })();
   const collectionLine = collectedAmount != null
@@ -1106,7 +1200,7 @@ STATE: phase=${pidState?.phase ?? 'unknown'} · runway=${pidState?.runway_pct !=
 Reason about expectations through this lens — a first-quarter PID without DJ locked is normal; a final-quarter PID without DJ locked is critical.
 
 === KNOWN SENDERS (from resolved roster) ===
-${[...senders.byName.values(), ...senders.byWaId.values()].map((s) => `${s.display_label} (${s.role})`).join(', ') || 'none resolved'}
+${[...new Set([...senders.byName.values(), ...senders.byWaId.values()].map((s) => `${s.display_label} (${s.role})`))].join(', ') || 'none resolved'}
 
 === PRIOR USER FEEDBACK ON BRIEFS FOR THIS PID ===
 ${feedback.length === 0
@@ -1181,6 +1275,10 @@ async function callHaiku(userPrompt: string): Promise<{ brief: HaikuBriefOutput;
       .replace(/\s*```$/, '');
 
     const brief = JSON.parse(text) as HaikuBriefOutput;
+    const u = response.usage as unknown as Record<string, number>;
+    if (u.cache_creation_input_tokens || u.cache_read_input_tokens) {
+      process.stdout.write(` cache[w:${u.cache_creation_input_tokens ?? 0}/r:${u.cache_read_input_tokens ?? 0}]`);
+    }
     return {
       brief,
       usage: {
@@ -1339,7 +1437,7 @@ function renderMarkdown(
     ...((brief.unacknowledged_requests?.length ?? 0) > 0
       ? brief.unacknowledged_requests.map(
           (r) =>
-            `- [UNANSWERED ${r.days_unanswered}d] "${r.request}" — ${r.asked_by}, ${r.asked_on}`,
+            `- [UNANSWERED ${r.days_unanswered}d] "${r.request}"${r.verbatim ? ` — verbatim: "${r.verbatim}"` : ''} — ${r.asked_by}, ${r.asked_on}`,
         )
       : ['- None — every client request has been acknowledged']),
     ``,
@@ -1347,7 +1445,7 @@ function renderMarkdown(
     ``,
     `## Needs You`,
     ...(brief.needs_you.length
-      ? brief.needs_you.map((n) => `- [${n.priority}] ${n.action}`)
+      ? brief.needs_you.map((n) => `- [${n.priority}${n.risk_type ? '/' + n.risk_type : ''}] **${n.headline}** — ${n.detail}`)
       : ['- Nothing urgent']),
     ``,
     `---`,
@@ -1364,6 +1462,29 @@ function renderMarkdown(
           (f) => `- [FLAG] **${f.flag}** — chat: "${f.chat_says}" · tracker: "${f.tracker_says}"`,
         )
       : ['- None']),
+    ``,
+    `---`,
+    ``,
+    `## Vendor Coverage`,
+    ...(brief.vendor_coverage.length
+      ? brief.vendor_coverage.map(
+          (v) => `- **${v.vendor_type}**${v.vendor_name ? ` (${v.vendor_name})` : ''} — ${v.status}${v.last_mentioned ? ` · last mentioned ${v.last_mentioned}` : ''}${v.note ? ` · ${v.note}` : ''}`,
+        )
+      : ['- No vendor discussion in signal window']),
+    ``,
+    `---`,
+    ``,
+    `## Decision Intel`,
+    ...(brief.decision_intel.pending_decisions.length
+      ? [`**Pending:**`, ...brief.decision_intel.pending_decisions.map(
+          (d) => `- ${d.blocking ? '🔴 ' : ''}**${d.decision}** — owner: ${d.owner}${d.deadline ? ` · deadline: ${d.deadline}` : ''}`,
+        )]
+      : ['- No pending decisions']),
+    ...(brief.decision_intel.recent_decisions.length
+      ? [``, `**Recent:**`, ...brief.decision_intel.recent_decisions.map(
+          (d) => `- **${d.decision}** — ${d.decided_by}, ${d.decided_on}`,
+        )]
+      : []),
     ``,
     `---`,
     ``,
@@ -1441,7 +1562,8 @@ function writeMarkdownFiles(
 // --- Main ---
 
 async function main() {
-  const briefDate = new Date().toISOString().slice(0, 10);
+  const start = Date.now();
+  const briefDate = dateArg ?? todayIstYmd();
   const mode = isCatchup ? 'CATCH-UP' : 'DAILY';
 
   console.log(`\nGenerating ${mode} briefs for ${targetPids.length} PID(s) — ${briefDate}`);
@@ -1456,7 +1578,7 @@ async function main() {
     const [project, senders, signals, feedback, continuity, pidState, answeredClarifications] = await Promise.all([
       loadProject(pid),
       loadSenders(pid),
-      loadSignals(pid, isCatchup),
+      loadSignals(pid, isCatchup, briefDate),
       loadRecentFeedback(pid),
       loadPriorContinuity(pid, briefDate),
       loadPidState(pid),
@@ -1494,6 +1616,10 @@ async function main() {
 
     if (!result) { console.log('FAILED (Haiku error)'); failed++; continue; }
 
+    if (result.brief.ai_clarification.length > 3) {
+      result.brief.ai_clarification = result.brief.ai_clarification.slice(0, 3);
+    }
+
     // Merge Haiku output with deterministic computed fields to form the full Brief JSON v2.
     const finalBrief: BriefJSON = {
       ...result.brief,
@@ -1514,6 +1640,27 @@ async function main() {
       phase_expectations: computePhaseExpectations(pidState),
       exceptional_pid_score: computeExceptionalPidScore(signals, senders),
     };
+
+    // Post-gen validation: drop unack requests where asked_by is not a client
+    if (finalBrief.unacknowledged_requests.length > 0) {
+      const clientLabels = new Set<string>();
+      for (const [, info] of senders.byName) {
+        if (info.role === 'client') clientLabels.add(info.display_label.toLowerCase());
+      }
+      for (const [, info] of senders.byWaId) {
+        if (info.role === 'client') clientLabels.add(info.display_label.toLowerCase());
+      }
+      if (clientLabels.size > 0) {
+        const before = finalBrief.unacknowledged_requests.length;
+        finalBrief.unacknowledged_requests = finalBrief.unacknowledged_requests.filter(
+          (r) => clientLabels.has(r.asked_by.toLowerCase()),
+        );
+        const dropped = before - finalBrief.unacknowledged_requests.length;
+        if (dropped > 0) {
+          process.stdout.write(` [dropped ${dropped} non-client unack]`);
+        }
+      }
+    }
 
     try {
       await writeToDB(pid, briefDate, finalBrief, result.usage, isCatchup);
@@ -1551,6 +1698,15 @@ async function main() {
   console.log(`Tokens: ${totalInput.toLocaleString()} in / ${totalOutput.toLocaleString()} out`);
   console.log(`Est. cost: $${totalUSD.toFixed(4)} (~₹${(totalUSD * 84).toFixed(0)})`);
   console.log(`Markdown: ${VAULT_PATH}\\pids\\`);
+
+  await supabase.from('cron_runs').insert({
+    tier: 't1',
+    started_at: new Date(start).toISOString(),
+    finished_at: new Date().toISOString(),
+    status: failed > 0 && ok === 0 ? 'failed' : failed > 0 ? 'partial' : 'completed',
+    rows_written: ok,
+    cost_inr: Math.round(totalUSD * 84 * 100) / 100,
+  });
 }
 
 main().catch((err) => { console.error(err); process.exit(1); });

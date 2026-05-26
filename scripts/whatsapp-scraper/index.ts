@@ -104,6 +104,7 @@ async function scrapeAndStore(
 }
 
 wa.on('ready', async () => {
+  const scrapeStart = Date.now();
   console.log('Logged in. Waiting 5s for chat sync to settle...');
   await new Promise((r) => setTimeout(r, 5000));
   console.log('Fetching chats (this can take 30-90s on first run)...\n');
@@ -202,6 +203,14 @@ wa.on('ready', async () => {
     console.log(`  WhatsApp Web may not have synced. Try: close Chrome, run again.`);
     console.log(`  If session expired (14d inactive), QR rescan will be requested.`);
   }
+
+  await supabase.from('cron_runs').insert({
+    tier: 'scrape',
+    started_at: new Date(scrapeStart).toISOString(),
+    finished_at: new Date().toISOString(),
+    status: erroredPids.length > 0 && scrapedPids === 0 ? 'failed' : erroredPids.length > 0 ? 'partial' : 'completed',
+    rows_written: totalRows,
+  });
 
   console.log('\nDone. Exiting.');
   await wa.destroy();
