@@ -804,7 +804,20 @@ function AIClarification({ pid }: { pid: number }) {
       .gte('brief_date', sevenDaysAgo)
       .order('brief_date', { ascending: false })
       .order('created_at', { ascending: false })
-    setRows((data ?? []) as BriefClarificationRow[])
+    // Deduplicate: keep only the most recent version of each question.
+    // Rows are ordered by brief_date desc, so first occurrence wins.
+    // Use a fuzzy key (sorted content words) so slight rephrases collapse.
+    const STOP = new Set(['is', 'the', 'a', 'an', 'or', 'and', 'has', 'was', 'been', 'are', 'this', 'that', 'with', 'for', 'on', 'in', 'to', 'of', 'do', 'does', 'did'])
+    const fuzzyKey = (q: string) => q.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(w => w.length > 1 && !STOP.has(w)).sort().join(' ')
+    const seen = new Set<string>()
+    const deduped: BriefClarificationRow[] = []
+    for (const r of (data ?? []) as BriefClarificationRow[]) {
+      const key = fuzzyKey(r.question)
+      if (seen.has(key)) continue
+      seen.add(key)
+      deduped.push(r)
+    }
+    setRows(deduped)
   }, [pid, supabase])
 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- standard data-load on mount
