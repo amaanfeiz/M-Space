@@ -78,11 +78,14 @@ interface HaikuBriefOutput {
     status: 'open' | 'done' | 'overdue' | 'unclear';
   }>;
   needs_you: Array<{
-    action: string;
+    headline: string;
+    detail: string;
     priority: 'urgent' | 'soon' | 'when_able';
+    risk_type?: 'sentiment' | 'collection' | 'visibility' | 'process' | 'execution' | 'cancellation';
   }>;
   unacknowledged_requests: Array<{
     request: string;
+    verbatim?: string;
     asked_by: string;
     asked_on: string;
     days_unanswered: number;
@@ -215,10 +218,12 @@ const BRIEF_SCHEMA = {
       items: {
         type: 'object',
         properties: {
-          action: { type: 'string' },
+          headline: { type: 'string' },
+          detail: { type: 'string' },
           priority: { type: 'string', enum: ['urgent', 'soon', 'when_able'] },
+          risk_type: { type: 'string', enum: ['sentiment', 'collection', 'visibility', 'process', 'execution', 'cancellation'] },
         },
-        required: ['action', 'priority'],
+        required: ['headline', 'detail', 'priority'],
         additionalProperties: false,
       },
     },
@@ -228,11 +233,12 @@ const BRIEF_SCHEMA = {
         type: 'object',
         properties: {
           request: { type: 'string' },
+          verbatim: { type: 'string' },
           asked_by: { type: 'string' },
           asked_on: { type: 'string' },
           days_unanswered: { type: 'integer' },
         },
-        required: ['request', 'asked_by', 'asked_on', 'days_unanswered'],
+        required: ['request', 'verbatim', 'asked_by', 'asked_on', 'days_unanswered'],
         additionalProperties: false,
       },
     },
@@ -299,7 +305,7 @@ Read the project context (hard facts from the tracker) and WhatsApp chat signals
 2. EVERY soft-signal claim (client_pulse summary, what_changed items, commitment owner, etc.) must end with [Display Label, DD MMM] attribution showing who said it and when.
 3. If evidence is thin (e.g. only 2 messages), reflect low confidence. Do not pad sections.
 4. COMMITMENTS: extract only explicit promises ("I'll send X by Friday", "We'll confirm by Monday"). Not vague intentions.
-4b. UNACKNOWLEDGED REQUESTS — most critical category. List every client message in the chat window that contains a request, a question, or a decision the team has to make, where there is no team reply within 24 hours of the client message. For each entry: "request" = a one-line paraphrase of what the client asked for, "asked_by" = client display label, "asked_on" = DD MMM, "days_unanswered" = whole days from the client message to TODAY. If everything has been answered, return an empty array. Do NOT skip entries because they seem minor — an unanswered client is the highest-priority signal. A "request" is also when the client provides a piece of information that needs an acknowledgement, not just an explicit question.
+4b. UNACKNOWLEDGED REQUESTS — most critical category. List every client message in the chat window that contains a request, a question, or a decision the team has to make, where there is no team reply within 24 hours of the client message. For each entry: "request" = a one-line paraphrase, "verbatim" = the EXACT quote from the client's message (copy verbatim, do not paraphrase), "asked_by" = client display label, "asked_on" = DD MMM, "days_unanswered" = whole days from the client message to TODAY. If everything has been answered, return an empty array. Do NOT skip entries because they seem minor — an unanswered client is the highest-priority signal. A "request" is also when the client provides a piece of information that needs an acknowledgement, not just an explicit question.
 5. OPEN QUESTIONS: compose a SINGLE WhatsApp message for Amaan to send to the internal group. Rules:
    (a) Always open with "Hey Team," — NEVER address a specific planner by name. Amaan sends to the whole team.
    (b) On the second line add: "If any of these were discussed on call, please ensure there's a text trail." — always include this.
@@ -311,7 +317,7 @@ Read the project context (hard facts from the tracker) and WhatsApp chat signals
    (h) If there is nothing to clarify, set clarification_message to an empty string.
    (i) CONTINUITY — if Amaan asked something in the internal group in a prior brief and the team hasn't substantively responded, today's point references that prior ask: "Guys, still waiting on a response on X" or "any movement on the Y I asked about yesterday?" Do NOT restart conversations with fresh "what's the update on X" when X was already asked.
 6. CROSS-SOURCE FLAGS: raise a flag when chat clearly contradicts a tracker field, OR when commercial vocabulary (CP, SP, markup, margin, commission) appears in the CLIENT group — that is a severity-1 trust risk regardless of tracker state. Do not flag speculative differences.
-7. NEEDS YOU: surface only things that genuinely require Amaan's decision or action. Order client-experienced flags first (what the client is currently feeling/waiting on); place hidden process flags the client has no awareness of below them.
+7. NEEDS YOU: surface only things that genuinely require Amaan's decision or action. Each item has a "headline" (<15 words, TL-scannable) and a "detail" (full explanation with attribution). Tag each with a "risk_type" from: sentiment, collection, visibility, process, execution, cancellation. Order client-experienced flags first.
 8. ATTRIBUTION OF BLAME: separate client engagement risk from planner ownership failure. If the client is silent but the planner has been proactive and followed up, do NOT frame this as a planner issue. Blame must match evidence.
 9. OVER-FLAGGING: do not flag isolated words like "delay" or "waiting" as risk signals. Tie severity to: repetition, blame pattern, payment proximity, event proximity, and whether the team broke a communication loop.
 10. FLAG FRAMING: when raising any flag in needs_you or client_pulse, name which risk it represents — sentiment risk, collection risk, visibility risk, process risk, or execution risk. This helps Amaan triage.
@@ -504,8 +510,10 @@ function buildSilenceBrief(
     what_changed: [`No team or client activity in window. Last signal was ${lastDateLabel} (${daysSilent} days ago).`],
     commitments: [],
     needs_you: [{
-      action: `Silence risk: PID silent ${daysSilent} days. Last activity ${lastDateLabel}. Project is Planning In-Progress with ${project.planner} as planner — chase status with planner today and confirm whether project is genuinely stalled or just off-channel.`,
+      headline: `PID silent ${daysSilent}d — chase planner status`,
+      detail: `Last activity ${lastDateLabel}. Project is Planning In-Progress with ${project.planner} as planner — chase status with planner today and confirm whether project is genuinely stalled or just off-channel.`,
       priority: 'urgent',
+      risk_type: 'visibility',
     }],
     unacknowledged_requests: [],
     open_questions: {
@@ -1354,7 +1362,7 @@ function renderMarkdown(
     ...((brief.unacknowledged_requests?.length ?? 0) > 0
       ? brief.unacknowledged_requests.map(
           (r) =>
-            `- [UNANSWERED ${r.days_unanswered}d] "${r.request}" — ${r.asked_by}, ${r.asked_on}`,
+            `- [UNANSWERED ${r.days_unanswered}d] "${r.request}"${r.verbatim ? ` — verbatim: "${r.verbatim}"` : ''} — ${r.asked_by}, ${r.asked_on}`,
         )
       : ['- None — every client request has been acknowledged']),
     ``,
@@ -1362,7 +1370,7 @@ function renderMarkdown(
     ``,
     `## Needs You`,
     ...(brief.needs_you.length
-      ? brief.needs_you.map((n) => `- [${n.priority}] ${n.action}`)
+      ? brief.needs_you.map((n) => `- [${n.priority}${n.risk_type ? '/' + n.risk_type : ''}] **${n.headline}** — ${n.detail}`)
       : ['- Nothing urgent']),
     ``,
     `---`,
@@ -1534,6 +1542,27 @@ async function main() {
       phase_expectations: computePhaseExpectations(pidState),
       exceptional_pid_score: computeExceptionalPidScore(signals, senders),
     };
+
+    // Post-gen validation: drop unack requests where asked_by is not a client
+    if (finalBrief.unacknowledged_requests.length > 0) {
+      const clientLabels = new Set<string>();
+      for (const [, info] of senders.byName) {
+        if (info.role === 'client') clientLabels.add(info.display_label.toLowerCase());
+      }
+      for (const [, info] of senders.byWaId) {
+        if (info.role === 'client') clientLabels.add(info.display_label.toLowerCase());
+      }
+      if (clientLabels.size > 0) {
+        const before = finalBrief.unacknowledged_requests.length;
+        finalBrief.unacknowledged_requests = finalBrief.unacknowledged_requests.filter(
+          (r) => clientLabels.has(r.asked_by.toLowerCase()),
+        );
+        const dropped = before - finalBrief.unacknowledged_requests.length;
+        if (dropped > 0) {
+          process.stdout.write(` [dropped ${dropped} non-client unack]`);
+        }
+      }
+    }
 
     try {
       await writeToDB(pid, briefDate, finalBrief, result.usage, isCatchup);

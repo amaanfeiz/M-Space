@@ -553,7 +553,7 @@ function NeedsYou({ items }: { items: BriefJSON['needs_you'] }) {
             {n.priority.replace('_', ' ')}
           </span>
           <span style={{ fontSize: 12, color: 'var(--text-primary)', lineHeight: 1.6 }}>
-            <LinkedText text={n.action} />
+            <LinkedText text={n.headline || n.action || ''} />
           </span>
         </div>
       ))}
