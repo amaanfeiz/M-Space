@@ -286,7 +286,6 @@ const BRIEF_SCHEMA = {
     client_experience_frame: { type: 'string' },
     ai_clarification: {
       type: 'array',
-      maxItems: 3,
       items: {
         type: 'object',
         properties: {
