@@ -20,6 +20,10 @@ export const ALL_AMAAN_PIDS: readonly number[] = [
   33565, 31574, 33313, 33867, 34002,
   // 2 added 2026-05-18 — both Booked, both Sales WIP (no planner yet)
   30260, 34656,
+  // 4 added 2026-05-29 — diffed against synced projects (team_lead = Amaan).
+  // 34140 active (Planning In-Progress, Aditya & Deeksha); rest new Sales WIP.
+  // Cancelled rows 28111/29964/28625 deliberately still excluded.
+  34140, 30837, 34965, 34803,
 ] as const;
 
 export const ALL_AMAAN_PIDS_STR: readonly string[] = ALL_AMAAN_PIDS.map(String);
