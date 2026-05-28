@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
-import Anthropic from '@anthropic-ai/sdk';
+import OpenAI from 'openai';
+import { z } from 'zod';
 import { config } from 'dotenv';
 import { resolve } from 'path';
 import { writeFileSync, mkdirSync } from 'fs';
@@ -13,12 +14,12 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
 );
 
-if (!process.env.ANTHROPIC_API_KEY) {
-  console.error('ANTHROPIC_API_KEY not set in .env.local');
+if (!process.env.DEEPSEEK_API_KEY) {
+  console.error('DEEPSEEK_API_KEY not set in .env.local');
   process.exit(1);
 }
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const deepseek = new OpenAI({ apiKey: process.env.DEEPSEEK_API_KEY, baseURL: 'https://api.deepseek.com' });
 
 const VAULT_PATH =
   process.env.VAULT_PATH ?? 'C:\\Users\\Amaan\\Obsidian\\Meragi-Intel';
@@ -370,10 +371,11 @@ Read the project context (hard facts from the tracker) and WhatsApp chat signals
 
 ## Hard rules
 1. NEVER assert payment amounts, package prices, GMV, or exact dates as facts derived from chat — these come only from the tracker fields labelled "TRACKER:".
-2. EVERY soft-signal claim (client_pulse summary, what_changed items, commitment owner, etc.) must end with [Display Label, DD MMM] attribution showing who said it and when.
+2. EVERY soft-signal claim (client_pulse summary, what_changed items, commitment owner, etc.) must end with [Display Label, DD MMM] attribution showing who said it and when. Exception: if a speaker is only identified by a raw @lid string (e.g. digits followed by @lid) or shows as "Unknown" or "?", OMIT the attribution suffix rather than guessing — an unattributed claim is better than a wrongly-attributed one.
+2b. team_status[].display_label is the PERSON NAME ONLY (e.g. "Bhavika Gurnani" or "Bhavika"). Do NOT include a role suffix "(Planner)" / "(Designer)" / "(PM)" inside team_status display_label — the role field is appended separately at render time and duplicates show as "Bhavika (Planner) (Planner)" in the final markdown. The role belongs only in the team_status.role field.
 3. If evidence is thin (e.g. only 2 messages), reflect low confidence. Do not pad sections.
 4. COMMITMENTS: extract only explicit promises ("I'll send X by Friday", "We'll confirm by Monday"). Not vague intentions.
-4b. UNACKNOWLEDGED REQUESTS — most critical category. List every client message in the chat window that contains a request, a question, or a decision the team has to make, where there is no team reply within 24 hours of the client message. For each entry: "request" = a one-line paraphrase, "verbatim" = the EXACT quote from the client's message (copy verbatim, do not paraphrase), "asked_by" = client display label, "asked_on" = DD MMM, "days_unanswered" = whole days from the client message to TODAY. If everything has been answered, return an empty array. Do NOT skip entries because they seem minor — an unanswered client is the highest-priority signal. A "request" is also when the client provides a piece of information that needs an acknowledgement, not just an explicit question.
+4b. UNACKNOWLEDGED REQUESTS — most critical category. List every client message in the chat window that contains a request, a question, or a decision the team has to make, where there is no team reply within 24 hours of the client message. For each entry: "request" = a one-line paraphrase, "verbatim" = the EXACT quote from the client's message (copy verbatim, do not paraphrase), "asked_by" = client display label, "asked_on" = DD MMM, "days_unanswered" = whole days from the client message to TODAY. If everything has been answered, return an empty array. Do NOT skip entries because they seem minor — an unanswered client is the highest-priority signal. A "request" is also when the client provides a piece of information that needs an acknowledgement, not just an explicit question. CRITICAL — DEFLECTION IS NOT AN ANSWER: a team reply like "we are working on it", "waiting for vendor confirmation", "will share soon", "let me check and revert", or any holding response that does NOT actually deliver what the client asked for, does NOT close the unack entry. The request stays in the unack list until the actual thing the client asked for is delivered (profile shared, call time confirmed, decision made, document sent). MIRROR RULE: if you wrote a needs_you item containing phrases like "client waiting", "unanswered Nd", "request from [client] not addressed", or "[client] asked X but no response" — the SAME issue MUST also appear as an unacknowledged_requests entry. needs_you and unacknowledged_requests are NOT alternatives — needs_you tells Amaan what to do; unack lists what the client is actively waiting on. The same client-side ask appears in BOTH sections. Use the client's first name (e.g. "Dharmik") as asked_by — do NOT include role suffix or partner names.
 5. OPEN QUESTIONS: compose a SINGLE WhatsApp message for Amaan to send to the internal group. Rules:
    (a) Always open with "Hey Team," — NEVER address a specific planner by name. Amaan sends to the whole team.
    (b) On the second line add: "If any of these were discussed on call, please ensure there's a text trail." — always include this.
@@ -391,13 +393,17 @@ Read the project context (hard facts from the tracker) and WhatsApp chat signals
 10. FLAG FRAMING: when raising any flag in needs_you or client_pulse, name which risk it represents — sentiment risk, collection risk, visibility risk, process risk, or execution risk. This helps Amaan triage.
 11. ACTION LADDER: use the lowest-appropriate intervention level — in ascending order: monitor, internal nudge, direct planner call, client-group entry, team reassignment. NEVER suggest founder escalation in the brief; sentiment-driven cancellation risk and pricing-wall escalation are synthesized by Amaan, not the AI.
 12. PRAISE: avoid generic positive observations ("the team has been responsive"). Only include a positive note if it is specific, actionable, and relevant to a risk Amaan is tracking.
-13. DATE REFERENCES: TODAY is ONLY the brief_date shown at the top of the user prompt after "TODAY:". NEVER use the word "today" to refer to a past commitment deadline, a chat message date, or any other date. If a deadline has passed, say "was due [DD MMM] ([N] days ago)" — never "was due today". If something happened in chat on a specific date, attribute it as "[DD MMM]" or "[N days ago]". The only time "today" is correct is for actions Amaan should take right now, on the brief_date.
+13. DATE REFERENCES: TODAY is ONLY the brief_date shown at the top of the user prompt after "TODAY:". NEVER use the word "today" to refer to a past commitment deadline, a chat message date, or any other date. If a deadline has passed, say "was due [DD MMM] ([N] days ago)" — never "was due today". If something happened in chat on a specific date, attribute it as "[DD MMM]" or "[N days ago]". The only time "today" is correct is for actions Amaan should take right now, on the brief_date. Use only the N-day values pre-computed in CHAT SIGNALS (shown as "— Nd ago" in the timestamp brackets). Do not recompute or estimate day counts from raw dates.
 14. LENGTH — short. Multi-item stacking is fine but each item brief. No jargon, no corporate register, no American-corporate phrasing. Operator-grade.
 15. SHARPNESS IS NEVER IN THE DRAFT — if a situation calls for sharper energy than the soft register supports, surface "this may need a direct call" in needs_you. Never write the sharper version in clarification_message.
 16. DIRECT-CALL TRIGGER — flag a candidate direct call when Amaan has nudged twice in the group on the same item without team response AND a third public follow-up would damage the visible thread's optics. Count + thread-optics, not count alone.
 17. SOURCE-AWARE FRAMING — when describing a signal, reference its source naturally. "Bhavika asked the client on the client group" vs "Bhavika confirmed the markup internally." Same content + different group = different severity.
 18. CROSS-GROUP CONTEXT CAN DE-FLAG — an internal-group note can re-frame a client-group signal. Example: design slowness on the client group is NOT a slip if the internal group has explained why (designer unwell, returning Monday). Do not flag what has already been explained internally.
 19. NO ESCALATION DRAFTS — never draft founder-bound escalation packets, hard-refusal scripts for the client group, recovery scripts (credentials → apology → reframe → action), or sharper-tone messages. Surface the state and ladder step; let Amaan write the response.
+20. DETERMINISTIC FLAGS ARE MANDATORY. The "=== DETERMINISTIC FLAGS ===" section in the user prompt lists lexical pre-pass hits already verified against project chat. EVERY CRITICAL flag listed there MUST surface in your output — either as a "cross_source_flags" entry (for source-mismatch / commercial-leak) or as a "needs_you" item with the matching risk_type (cancellation for WS41 self-sourcing, process for WS50 CP/SP leak, process for WS14/WS15 cancel/won't-pay, visibility for WS43 empaneled-vendor). HIGH severity flags should surface unless the chat context already explains them away (see rule 18). Do not silently drop a deterministic flag.
+
+## WS41 — Self-sourcing risk
+If the client signals intent to source a vendor themselves — phrases like "we'll handle X ourselves", "we'll book Y directly", "we're going to arrange Z on our own", or Hinglish equivalents ("khud kar lenge", "hum le lenge", "apne aap karenge") — this is a severity-1 trust collapse from first instance, not after repetition. Surface in "needs_you" with risk_type: cancellation and priority: urgent. Carve-out: if the same message names a family relationship (cousin, uncle, brother-in-law, mama, chacha, family friend, "my brother", "family knows them"), downgrade to a "cross_source_flags" entry for trend-watching only — relationship vendors are not a vote of no confidence.
 
 ## Required additional fields (Brief JSON v2)
 
@@ -410,7 +416,7 @@ Beyond the existing sections, emit two more fields:
 - "Fully aligned, no active expectation."
 Never empty. If nothing is active, say "No active expectation" or describe the current calm.
 
-**vendor_coverage** — array of vendor mentions extracted from chat. For each vendor discussed in the signal window: vendor_type (photographer, decorator, caterer, florist, venue, DJ, pandit, choreographer, makeup_artist, lighting, videographer, entertainment, other), vendor_name (name if mentioned, "" if unnamed), status (confirmed = locked in, pending = discussed but not confirmed, at_risk = issues/delays, unknown = just mentioned), last_mentioned (DD MMM), note (one-line context). Only include vendors actually discussed in signals. Empty array if no vendor conversation in window.
+**vendor_coverage** — array of vendor mentions extracted from chat. For each vendor discussed in the signal window: vendor_type (photographer, decorator, caterer, florist, venue, DJ, pandit, choreographer, makeup_artist, lighting, videographer, entertainment, other), vendor_name (name if mentioned, "" if unnamed), status (confirmed = locked in, pending = discussed but not confirmed, at_risk = issues/delays, unknown = just mentioned), last_mentioned (DD MMM), note (one-line context). Only include vendors actually discussed in signals. Empty array if no vendor conversation in window. If a vendor type is discussed but no name appears in chat, set vendor_name to "" AND add a corresponding entry to "ai_clarification" with category vendor and a question like "Which photographer was discussed on DD MMM — no name given in chat?". Never invent a vendor name or carry over a name from prior context.
 
 **decision_intel** — { pending_decisions, recent_decisions }. pending_decisions: things that need a decision but haven't been made yet (deadline = DD MMM or "", blocking = true if other work is waiting on this). recent_decisions: decisions made in the signal window (decided_by = display label, decided_on = DD MMM). Only include clear decisions, not vague preferences. Both arrays can be empty.
 
@@ -476,6 +482,14 @@ Bad (do not do):
 - % for collection, always use ₹ amount from TRACKER
 - Restarting a conversation already in progress ("what's the update on decor?" when it was asked yesterday and is unanswered — say "still waiting on" instead)
 - Sharp/escalatory tone in the draft message — if the situation needs sharper energy, surface "may need a direct call" in needs_you, never write the sharp version
+
+## what_changed (MANDATORY — minimum 3 items when signals exist)
+List 3-8 concrete events from the signal window. Each item: one sentence, ending with [Display Label, DD MMM] attribution. Focus on things that moved, broke, or appeared since the last brief. Examples:
+- "Payment of ₹5L confirmed via NEFT [Bhavika, 18 May]"
+- "Client chased photographer deliverables for second time [Aayushi, 18 May]"
+- "Venue contract shared internally but not yet sent to client [Tapasya, 15 May]"
+
+FORBIDDEN: "No notable changes", "Quiet week", "Nothing happened", or any placeholder string. If you can't find 3 events, you are not reading hard enough — vendor shares, deliverables sent, calls scheduled, asks made, silences that broke, profiles requested, overdue items still overdue — all count as events. Returning a 1-item array with a placeholder phrase is treated as failure. Empty array allowed ONLY when the signal count is literally zero.
 
 ## Mode
 The user prompt will specify CATCH-UP (full project history) or DAILY (last 14 days).
@@ -1111,6 +1125,7 @@ function buildUserPrompt(
   continuity: PriorContinuity,
   pidState: PidState | null,
   answeredClarifications: AnsweredClarification[],
+  sopFlags: SopFlagRow[],
   catchup: boolean,
   briefDate: string,
 ): string {
@@ -1156,6 +1171,7 @@ function buildUserPrompt(
     meragi_other: 'Meragi',
     unknown: '?',
   };
+  const briefMidnightMs = new Date(briefDate + 'T00:00:00+05:30').getTime();
   const allSignalLines = signals.map((sig) => {
     const senderInfo = sig.sender_name
       ? senders.byName.get(sig.sender_name)
@@ -1165,7 +1181,8 @@ function buildUserPrompt(
     const label = senderInfo?.display_label ?? sig.sender_name ?? sig.sender_wa_id ?? 'Unknown';
     const roleLabel = senderInfo?.role ? (ROLE_LABEL[senderInfo.role] ?? senderInfo.role) : '?';
     const groupTag = sig.chat_type === 'client' ? '[CLIENT-GROUP]' : '[INTERNAL]';
-    return `[${formatDate(sig.sent_at)} ${formatTime(sig.sent_at)}] ${groupTag} ${label} (${roleLabel}): ${sig.body}`;
+    const daysAgo = Math.max(0, Math.floor((briefMidnightMs - new Date(sig.sent_at).getTime()) / (24 * 60 * 60 * 1000)));
+    return `[${formatDate(sig.sent_at)} ${formatTime(sig.sent_at)} — ${daysAgo}d ago] ${groupTag} ${label} (${roleLabel}): ${sig.body}`;
   });
 
   // Iterate from newest (end of array) backwards, prepend; stop when budget exhausted
@@ -1200,6 +1217,11 @@ Reason about expectations through this lens — a first-quarter PID without DJ l
 
 === KNOWN SENDERS (from resolved roster) ===
 ${[...new Set([...senders.byName.values(), ...senders.byWaId.values()].map((s) => `${s.display_label} (${s.role})`))].join(', ') || 'none resolved'}
+
+=== DETERMINISTIC FLAGS (lexical pre-pass, last 14 days) ===
+${sopFlags.length === 0
+  ? 'No deterministic flags fired in this window.'
+  : sopFlags.map((f) => `[${f.severity.toUpperCase()}] ${f.flag} — ${f.detail}`).join('\n')}
 
 === PRIOR USER FEEDBACK ON BRIEFS FOR THIS PID ===
 ${feedback.length === 0
@@ -1242,51 +1264,174 @@ ${lines.join('\n')}
 Generate the JSON brief for PID ${project.pid} (${project.cx_name ?? '?'}).`;
 }
 
-// --- Haiku call ---
+// --- SOP / lexical flags ---
 
-async function callHaiku(userPrompt: string): Promise<{ brief: HaikuBriefOutput; usage: { input_tokens: number; output_tokens: number } } | null> {
-  try {
-    const response = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 4096,
-      temperature: 0,
-      system: [
-        {
-          type: 'text' as const,
-          text: SYSTEM_PROMPT,
-          cache_control: { type: 'ephemeral' as const },
-        },
-      ],
-      messages: [{ role: 'user', content: userPrompt }],
-      output_config: {
-        format: {
-          type: 'json_schema',
-          schema: BRIEF_SCHEMA,
-        },
-      },
-    });
+interface SopFlagRow {
+  pid: number;
+  flag: string;
+  severity: string;
+  detail: string;
+}
 
-    const block = response.content.find((b) => b.type === 'text');
-    if (!block || block.type !== 'text') return null;
+async function loadSopFlags(pid: number): Promise<SopFlagRow[]> {
+  const { data } = await supabase
+    .from('sop_flags')
+    .select('pid, flag, severity, detail')
+    .eq('pid', pid);
+  return (data ?? []) as SopFlagRow[];
+}
 
-    const text = block.text.trim()
-      .replace(/^```(?:json)?\s*/i, '')
-      .replace(/\s*```$/, '');
+// --- T1 call (DeepSeek V4 Pro) ---
 
-    const brief = JSON.parse(text) as HaikuBriefOutput;
-    const u = response.usage as unknown as Record<string, number>;
-    if (u.cache_creation_input_tokens || u.cache_read_input_tokens) {
-      process.stdout.write(` cache[w:${u.cache_creation_input_tokens ?? 0}/r:${u.cache_read_input_tokens ?? 0}]`);
+// --- Zod schema for T1 output validation ---
+
+const briefZod = z.object({
+  client_pulse: z.object({
+    sentiment: z.enum(['positive', 'neutral', 'cautious', 'anxious', 'cold']),
+    confidence: z.enum(['high', 'medium', 'low']),
+    summary: z.string(),
+    days_silent: z.number(),
+  }),
+  team_status: z.array(z.object({
+    display_label: z.string(),
+    role: z.string(),
+    last_active_date: z.string(),
+    activity_note: z.string(),
+  })),
+  what_changed: z.array(z.string()),
+  commitments: z.array(z.object({
+    what: z.string(),
+    owner: z.string(),
+    due: z.string(),
+    status: z.enum(['open', 'done', 'overdue', 'unclear']),
+  })),
+  needs_you: z.array(z.object({
+    headline: z.string(),
+    detail: z.string(),
+    priority: z.enum(['urgent', 'soon', 'when_able']),
+    risk_type: z.enum(['sentiment', 'collection', 'visibility', 'process', 'execution', 'cancellation']).optional(),
+  })),
+  unacknowledged_requests: z.array(z.object({
+    request: z.string(),
+    verbatim: z.string().optional(),
+    asked_by: z.string(),
+    asked_on: z.string(),
+    days_unanswered: z.number(),
+  })),
+  open_questions: z.object({
+    clarification_message: z.string(),
+  }),
+  cross_source_flags: z.array(z.object({
+    flag: z.string(),
+    chat_says: z.string(),
+    tracker_says: z.string(),
+  })),
+  client_experience_frame: z.string(),
+  ai_clarification: z.array(z.object({
+    question: z.string(),
+    reason: z.string(),
+    category: z.enum(['sentiment', 'payment', 'team', 'vendor', 'other']),
+  })),
+  vendor_coverage: z.array(z.object({
+    vendor_type: z.string(),
+    vendor_name: z.string(),
+    status: z.enum(['confirmed', 'pending', 'at_risk', 'unknown']),
+    last_mentioned: z.string(),
+    note: z.string(),
+  })),
+  decision_intel: z.object({
+    pending_decisions: z.array(z.object({
+      decision: z.string(),
+      owner: z.string(),
+      deadline: z.string(),
+      blocking: z.boolean(),
+    })),
+    recent_decisions: z.array(z.object({
+      decision: z.string(),
+      decided_by: z.string(),
+      decided_on: z.string(),
+    })),
+  }),
+});
+
+// --- Retry wrapper for transient errors (429, 503) ---
+
+async function withRetry<T>(fn: () => Promise<T>, retries = 3, baseDelayMs = 3000): Promise<T> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const msg = (err as Error).message ?? '';
+      const isRetryable = msg.includes('429') || msg.includes('503') || msg.includes('rate') || msg.includes('high demand');
+      if (!isRetryable || attempt === retries) throw err;
+      const delay = baseDelayMs * Math.pow(2, attempt);
+      process.stdout.write(` [retry ${attempt + 1} in ${(delay / 1000).toFixed(0)}s]`);
+      await new Promise((r) => setTimeout(r, delay));
     }
+  }
+  throw new Error('unreachable');
+}
+
+async function callT1(userPrompt: string): Promise<{ brief: HaikuBriefOutput; usage: { input_tokens: number; output_tokens: number } } | null> {
+  const augmentedSystem = SYSTEM_PROMPT +
+    '\n\nYou MUST respond with valid JSON matching this exact schema:\n' +
+    JSON.stringify(BRIEF_SCHEMA, null, 2);
+  const fullUserPrompt = userPrompt + '\n\nRESPOND WITH ONLY THE JSON OBJECT. No markdown, no preamble, no explanation.';
+
+  try {
+    type DSResponse = { choices: Array<{ message: { content: string | null } }>; usage?: { prompt_tokens?: number; completion_tokens?: number } };
+    const response = await withRetry(() => deepseek.chat.completions.create({
+      model: 'deepseek-v4-pro',
+      max_tokens: 16384,
+      temperature: 0,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: augmentedSystem },
+        { role: 'user', content: fullUserPrompt },
+      ],
+    } as Parameters<typeof deepseek.chat.completions.create>[0])) as unknown as DSResponse;
+
+    const rawText = response.choices[0]?.message?.content ?? '';
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(rawText);
+    } catch {
+      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        console.error(`  T1 parse error: no JSON object found`);
+        return null;
+      }
+      try {
+        parsed = JSON.parse(jsonMatch[0]);
+      } catch (e2) {
+        console.error(`  T1 parse error:`, (e2 as Error).message);
+        return null;
+      }
+    }
+
+    const validation = briefZod.safeParse(parsed);
+    if (!validation.success) {
+      const issues = validation.error.issues.slice(0, 3).map((i) => `${i.path.join('.')}: ${i.message}`);
+      console.error(`  T1 Zod validation failed:`, issues.join('; '));
+      return null;
+    }
+
+    const usage = response.usage;
+    const u = usage as unknown as Record<string, number>;
+    if (u.prompt_cache_hit_tokens || u.prompt_cache_miss_tokens) {
+      process.stdout.write(` cache[w:${u.prompt_cache_miss_tokens ?? 0}/r:${u.prompt_cache_hit_tokens ?? 0}]`);
+    }
+
     return {
-      brief,
+      brief: validation.data as HaikuBriefOutput,
       usage: {
-        input_tokens: response.usage.input_tokens,
-        output_tokens: response.usage.output_tokens,
+        input_tokens: usage?.prompt_tokens ?? 0,
+        output_tokens: usage?.completion_tokens ?? 0,
       },
     };
   } catch (err) {
-    console.error(`  Haiku error:`, err instanceof Error ? err.message : err);
+    console.error(`  T1 error:`, err instanceof Error ? err.message : err);
     return null;
   }
 }
@@ -1304,7 +1449,7 @@ async function writeToDB(
     {
       pid,
       brief_date: briefDate,
-      model: 'claude-haiku-4-5-20251001',
+      model: 'deepseek-v4-pro',
       input_tokens: usage.input_tokens,
       output_tokens: usage.output_tokens,
       is_catchup: catchup,
@@ -1566,7 +1711,7 @@ async function main() {
   const mode = isCatchup ? 'CATCH-UP' : 'DAILY';
 
   console.log(`\nGenerating ${mode} briefs for ${targetPids.length} PID(s) — ${briefDate}`);
-  console.log(`Model: claude-haiku-4-5-20251001  T=0  Cache: on\n`);
+  console.log(`Model: deepseek-v4-pro  T=0  max_tokens=16384\n`);
 
   let ok = 0, failed = 0;
   let totalInput = 0, totalOutput = 0;
@@ -1574,7 +1719,7 @@ async function main() {
   for (const pid of targetPids) {
     process.stdout.write(`PID ${pid}... `);
 
-    const [project, senders, signals, feedback, continuity, pidState, answeredClarifications] = await Promise.all([
+    const [project, senders, signals, feedback, continuity, pidState, answeredClarifications, sopFlags] = await Promise.all([
       loadProject(pid),
       loadSenders(pid),
       loadSignals(pid, isCatchup, briefDate),
@@ -1582,6 +1727,7 @@ async function main() {
       loadPriorContinuity(pid, briefDate),
       loadPidState(pid),
       loadAnsweredClarifications(pid),
+      loadSopFlags(pid),
     ]);
 
     if (!project) { console.log('SKIP (project not found)'); failed++; continue; }
@@ -1610,10 +1756,10 @@ async function main() {
       continue;
     }
 
-    const userPrompt = buildUserPrompt(project, senders, signals, feedback, continuity, pidState, answeredClarifications, isCatchup, briefDate);
-    const result = await callHaiku(userPrompt);
+    const userPrompt = buildUserPrompt(project, senders, signals, feedback, continuity, pidState, answeredClarifications, sopFlags, isCatchup, briefDate);
+    const result = await callT1(userPrompt);
 
-    if (!result) { console.log('FAILED (Haiku error)'); failed++; continue; }
+    if (!result) { console.log('FAILED (T1 error)'); failed++; continue; }
 
     if (result.brief.ai_clarification.length > 3) {
       result.brief.ai_clarification = result.brief.ai_clarification.slice(0, 3);
@@ -1640,19 +1786,22 @@ async function main() {
       exceptional_pid_score: computeExceptionalPidScore(signals, senders),
     };
 
-    // Post-gen validation: drop unack requests where asked_by is not a client
+    // Post-gen validation: drop unack requests where asked_by is not a client.
+    // Match on first-word case-insensitive prefix so "Dharmik" matches "Dharmik Patel"
+    // or "Dharmik (Client)" in the resolved sender map.
     if (finalBrief.unacknowledged_requests.length > 0) {
-      const clientLabels = new Set<string>();
+      const firstWord = (s: string) => s.trim().split(/[\s(,]/)[0].toLowerCase();
+      const clientFirstNames = new Set<string>();
       for (const [, info] of senders.byName) {
-        if (info.role === 'client') clientLabels.add(info.display_label.toLowerCase());
+        if (info.role === 'client') clientFirstNames.add(firstWord(info.display_label));
       }
       for (const [, info] of senders.byWaId) {
-        if (info.role === 'client') clientLabels.add(info.display_label.toLowerCase());
+        if (info.role === 'client') clientFirstNames.add(firstWord(info.display_label));
       }
-      if (clientLabels.size > 0) {
+      if (clientFirstNames.size > 0) {
         const before = finalBrief.unacknowledged_requests.length;
         finalBrief.unacknowledged_requests = finalBrief.unacknowledged_requests.filter(
-          (r) => clientLabels.has(r.asked_by.toLowerCase()),
+          (r) => clientFirstNames.has(firstWord(r.asked_by)),
         );
         const dropped = before - finalBrief.unacknowledged_requests.length;
         if (dropped > 0) {
@@ -1688,8 +1837,8 @@ async function main() {
     );
   }
 
-  const inputCost = (totalInput / 1_000_000) * 1.00;   // $1/1M input
-  const outputCost = (totalOutput / 1_000_000) * 5.00;  // $5/1M output
+  const inputCost = (totalInput / 1_000_000) * 0.435;   // $0.435/1M input (DS V4 Pro)
+  const outputCost = (totalOutput / 1_000_000) * 0.87;  // $0.87/1M output (DS V4 Pro)
   const totalUSD = inputCost + outputCost;
 
   console.log(`\n=== Done ===`);
