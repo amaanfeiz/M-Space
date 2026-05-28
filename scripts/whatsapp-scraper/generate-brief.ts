@@ -1388,11 +1388,13 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 3, baseDelayMs = 300
   throw new Error('unreachable');
 }
 
-async function callT1(userPrompt: string): Promise<{ brief: HaikuBriefOutput; usage: { input_tokens: number; output_tokens: number } } | null> {
+async function callT1(userPrompt: string, retryNudge?: string): Promise<{ brief: HaikuBriefOutput; usage: { input_tokens: number; output_tokens: number } } | null> {
   const augmentedSystem = SYSTEM_PROMPT +
     '\n\nYou MUST respond with valid JSON matching this exact schema:\n' +
     JSON.stringify(BRIEF_SCHEMA, null, 2);
-  const fullUserPrompt = userPrompt + '\n\nRESPOND WITH ONLY THE JSON OBJECT. No markdown, no preamble, no explanation.';
+  const fullUserPrompt = userPrompt +
+    (retryNudge ? '\n\n' + retryNudge : '') +
+    '\n\nRESPOND WITH ONLY THE JSON OBJECT. No markdown, no preamble, no explanation.';
 
   try {
     type DSResponse = { choices: Array<{ message: { content: string | null } }>; usage?: { prompt_tokens?: number; completion_tokens?: number } };
@@ -1773,9 +1775,23 @@ async function main() {
     }
 
     const userPrompt = buildUserPrompt(project, senders, signals, feedback, continuity, pidState, answeredClarifications, sopFlags, isCatchup, briefDate);
-    const result = await callT1(userPrompt);
+    let result = await callT1(userPrompt);
 
     if (!result) { console.log('FAILED (T1 error)'); failed++; continue; }
+
+    // Deterministic guard: DeepSeek occasionally returns an empty what_changed
+    // despite signals existing — the C1 self-audit prompt rule doesn't reliably
+    // bind it (seen on PIDs 32245, 30646). signals.length is > 0 here (the
+    // zero-signal case took the silence-brief path above). Retry once with an
+    // explicit correction; keep the retry only if it actually populated the field.
+    if (result.brief.what_changed.length === 0) {
+      process.stdout.write(' [what_changed empty — retrying]');
+      const retry = await callT1(
+        userPrompt,
+        'CORRECTION: your previous attempt returned an EMPTY what_changed array, but there ARE chat signals in this window — that is a failure. Re-read the signals and populate what_changed with at least 3 concrete events from the window (vendor shares, deliverables sent, calls scheduled, asks made, silences broken, overdue items still open), each one sentence ending with [Display Label, DD MMM].',
+      );
+      if (retry && retry.brief.what_changed.length > 0) result = retry;
+    }
 
     if (result.brief.ai_clarification.length > 3) {
       result.brief.ai_clarification = result.brief.ai_clarification.slice(0, 3);
