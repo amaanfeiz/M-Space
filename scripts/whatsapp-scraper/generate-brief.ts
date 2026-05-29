@@ -19,7 +19,10 @@ if (!process.env.DEEPSEEK_API_KEY) {
   process.exit(1);
 }
 
-const deepseek = new OpenAI({ apiKey: process.env.DEEPSEEK_API_KEY, baseURL: 'https://api.deepseek.com' });
+// timeout 360s: DeepSeek V4 Pro emits reasoning tokens so normal calls run ~250-280s;
+// 360s lets a genuinely hung socket fail (instead of waiting the SDK's 600s default) so
+// withRetry can re-attempt. maxRetries 0 keeps withRetry as the single retry layer.
+const deepseek = new OpenAI({ apiKey: process.env.DEEPSEEK_API_KEY, baseURL: 'https://api.deepseek.com', timeout: 360_000, maxRetries: 0 });
 
 const VAULT_PATH =
   process.env.VAULT_PATH ?? 'C:\\Users\\Amaan\\Obsidian\\Meragi-Intel';
@@ -1382,7 +1385,8 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 3, baseDelayMs = 300
       const isRetryable =
         msg.includes('429') || msg.includes('503') || msg.includes('rate') || msg.includes('high demand') ||
         msg.includes('terminated') || msg.includes('econnreset') || msg.includes('socket hang up') ||
-        msg.includes('fetch failed') || msg.includes('etimedout') || msg.includes('connection error');
+        msg.includes('fetch failed') || msg.includes('etimedout') || msg.includes('connection error') ||
+        msg.includes('timeout') || msg.includes('timed out') || msg.includes('aborted');
       if (!isRetryable || attempt === retries) throw err;
       const delay = baseDelayMs * Math.pow(2, attempt);
       process.stdout.write(` [retry ${attempt + 1} in ${(delay / 1000).toFixed(0)}s]`);
@@ -1429,6 +1433,24 @@ async function callT1(userPrompt: string, retryNudge?: string): Promise<{ brief:
       } catch (e2) {
         console.error(`  T1 parse error:`, (e2 as Error).message);
         return null;
+      }
+    }
+
+    // DeepSeek occasionally emits an out-of-enum ai_clarification.category (e.g.
+    // "execution"), which would otherwise fail the entire brief. Salvage it by
+    // coercing any invalid category to "other" before validation.
+    if (parsed && typeof parsed === 'object') {
+      const ac = (parsed as { ai_clarification?: unknown }).ai_clarification;
+      if (Array.isArray(ac)) {
+        const validCats = new Set(['sentiment', 'payment', 'team', 'vendor', 'other']);
+        for (const item of ac) {
+          if (item && typeof item === 'object') {
+            const cat = (item as { category?: unknown }).category;
+            if (typeof cat !== 'string' || !validCats.has(cat)) {
+              (item as { category: string }).category = 'other';
+            }
+          }
+        }
       }
     }
 
